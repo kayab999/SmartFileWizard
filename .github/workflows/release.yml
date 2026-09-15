@@ -79,10 +79,21 @@ jobs:
       - name: Smoke check .deb
         run: |
           sudo dpkg -i dist/*.deb || sudo apt-get install -f -y
+          echo "--- dpkg -L ---"
+          dpkg -L filewizard | head -n 50
+          echo "--- /opt/filewizard ---"
+          ls -R /opt/filewizard | head -n 80
+          ls -lh /opt/filewizard/FileWizard || true
+          file /opt/filewizard/FileWizard || true
+          echo "--- /usr/bin shims ---"
+          ls -lh /usr/bin/filewizard* || true
+          cat /usr/bin/filewizard || true
+          echo "--- validate desktop ---"
+          desktop-file-validate /usr/share/applications/filewizard.desktop || true
+          echo "--- run filewizard --help ---"
           filewizard --help
           filewizard --version
-          dpkg -L filewizard | head -n 30
-          desktop-file-validate /usr/share/applications/filewizard.desktop || true
+          filewizard-ui --help || echo "ui help exit code $?"
       - name: Upload .deb to Release
         uses: softprops/action-gh-release@v2
         with:

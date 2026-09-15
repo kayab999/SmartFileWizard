@@ -21,8 +21,11 @@ recommends:
 suggests:
   - llama-server
 contents:
-  - src: ./dist/FileWizard
-    dst: /opt/filewizard
+  - src: ./dist/FileWizard/FileWizard
+    dst: /opt/filewizard/FileWizard
+    type: file
+  - src: ./dist/FileWizard/_internal
+    dst: /opt/filewizard/_internal
     type: dir
   - src: ./packaging/filewizard.desktop
     dst: /usr/share/applications/filewizard.desktop
