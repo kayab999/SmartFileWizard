@@ -89,8 +89,11 @@ cp "$ROOT/src/filewizard/ui/assets/app_icon_256.png" "$APPDIR/.DirIcon"
 cp "$ROOT/packaging/appimage/AppRun" "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
 
-# Symlinks so invoking as filewizard* works inside the mount
-ln -sf "filewizard" "$APPDIR/usr/bin/filewizard-cli" 2>/dev/null || true
+# Symlinks so invoking as filewizard* works inside the mount (AppRun not needed for these)
+ln -sf "FileWizard" "$APPDIR/usr/bin/filewizard" 2>/dev/null || true
+ln -sf "FileWizard" "$APPDIR/usr/bin/filewizard-ui" 2>/dev/null || true
+ln -sf "FileWizard" "$APPDIR/usr/bin/filewizard-mcp" 2>/dev/null || true
+ln -sf "FileWizard" "$APPDIR/usr/bin/filewizard-cli" 2>/dev/null || true
 
 echo "[build] AppDir tree:"
 find "$APPDIR" -maxdepth 4 -type f -o -type l | sort | head -n 40

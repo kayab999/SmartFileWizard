@@ -81,7 +81,7 @@ excludes = [
 ]
 
 a = Analysis(
-    [str(SPEC_DIR / "entry_gui.py"), str(SPEC_DIR / "entry_cli.py")],
+    [str(SPEC_DIR / "entry_main.py")],
     pathex=[str(SRC)],
     binaries=[],
     datas=datas,
@@ -98,29 +98,12 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# Two entry points sharing the same COLLECT (one-dir):
-#   filewizard-ui  -> GUI (console=False, windowed)
-#   filewizard     -> CLI (console=True)
-exe_ui = EXE(
+exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name="filewizard-ui",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    console=False,
-    icon=str(SRC / "filewizard" / "ui" / "assets" / "app_icon_256.png"),
-)
-
-exe_cli = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=True,
-    name="filewizard",
+    name="FileWizard",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -130,8 +113,7 @@ exe_cli = EXE(
 )
 
 coll = COLLECT(
-    exe_ui,
-    exe_cli,
+    exe,
     a.binaries,
     a.zipfiles,
     a.datas,
