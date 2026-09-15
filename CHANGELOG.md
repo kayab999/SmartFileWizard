@@ -19,11 +19,12 @@ Downloads coverage, review labels on next plan, extra predicates, desktop icon +
 - Conditions `older_than_days`, `min_aspect`, `max_aspect`.
 - `packaging/filewizard.desktop` + `install-desktop.sh` (user-local hicolor icon).
 - **AppImage** `FileWizard-0.11.0-x86_64.AppImage` — PyInstaller one-dir + `appimagetool` (`packaging/appimage/`); double-click GUI, CLI via same bundle (`--help` dispatch); `LICENSE` (MIT); `release.yml` tag workflow.
+- **.deb** `filewizard_0.11.0_amd64.deb` — `nfpm` from same `dist/FileWizard` (`/opt/filewizard` + `/usr/bin` shims + desktop/icon, XDG state preserved); `packaging/nfpm.yaml` + `packaging/deb/build-deb.sh`; release workflow builds + smokes + uploads `.deb`.
 
 ### Changed
 
 - Desktop file adds `Keywords` + `StartupWMClass`; install script validates and documents AppImage self-containment.
-- `README` + `USER_MANUAL` gain AppImage install section; `docs/RELEASE.md` documents build outputs.
+- `README` + `USER_MANUAL` gain AppImage + `.deb` install sections; `docs/RELEASE.md` documents both build outputs.
 
 ### Tests
 

@@ -77,6 +77,23 @@ For most Linux users — one file, double-click to run.
 
 > **Build it yourself:** `bash packaging/appimage/build.sh` → `dist/FileWizard-0.11.0-x86_64.AppImage` (needs `PyInstaller` + `appimagetool`; see [`packaging/appimage/README.md`](packaging/appimage/README.md)).
 
+### Option A2 — .deb (Debian/Ubuntu, optional)
+
+For users who prefer a system package:
+
+```bash
+# From Releases
+sudo dpkg -i filewizard_0.11.0_amd64.deb
+sudo apt-get install -f -y  # fix deps if needed (libgl1, libxcb, etc.)
+
+filewizard --help
+filewizard-ui                # GUI — same engine as AppImage
+```
+
+- Installs to `/opt/filewizard/` + symlinks in `/usr/bin` (`filewizard`, `filewizard-ui`, `filewizard-mcp`) and desktop entry `filewizard.desktop` → menu `FileWizard`.
+- Same XDG state: `~/.local/share/filewizard/` (not removed on `apt remove`).
+- Build it yourself: `bash packaging/deb/build-deb.sh` → `dist/filewizard_0.11.0_amd64.deb` (needs `PyInstaller` + `nfpm`; reuses `dist/FileWizard/` from AppImage).
+
 ### Option B — From source (developers / pip)
 
 ```bash
@@ -308,15 +325,17 @@ pip install -e ".[dev,ui]"
 pytest -q
 ```
 
-### Building the AppImage
+### Building the AppImage / .deb
 
 ```bash
 bash packaging/appimage/build.sh          # needs PyInstaller + appimagetool
 ls -lh dist/FileWizard-0.11.0-x86_64.AppImage
 ./dist/FileWizard-*.AppImage --help
+
+bash packaging/deb/build-deb.sh           # needs PyInstaller payload + nfpm → dist/*.deb
 ```
 
-Reproducible steps + CI: [`packaging/appimage/README.md`](packaging/appimage/README.md) and `.github/workflows/release.yml`.
+Reproducible steps + CI: [`packaging/appimage/README.md`](packaging/appimage/README.md), [`packaging/nfpm.yaml`](packaging/nfpm.yaml) and `.github/workflows/release.yml`.
 
 Expect **224** unit tests (core needs no display).
 
@@ -341,7 +360,7 @@ See **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 | **0.7** | **Shipped:** MCP server — 9 tools over stdio; plan/execute/undo + agent labels (confirm-gated) |
 | **0.8** | **Shipped:** MCP uses perception; UX (badge, evidence, watch, catalog, review export) |
 | **0.9+** | Extra backends, daemon/inotify | 
-| **0.11** | **Shipped:** AppImage (`FileWizard-0.11.0-x86_64.AppImage`), `.desktop` + hicolor icon |
+| **0.11** | **Shipped:** AppImage (`FileWizard-0.11.0-x86_64.AppImage`) + `.deb` (`filewizard_0.11.0_amd64.deb`), `.desktop` + hicolor icon |
 
 ---
 

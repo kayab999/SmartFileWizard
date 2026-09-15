@@ -63,17 +63,28 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
 
-  # Optional .deb (kept disabled by default — uncomment to enable)
-  # deb:
-  #   needs: appimage
-  #   runs-on: ubuntu-22.04
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - run: |
-  #         # build .deb from the same AppDir via nfpm
-  #         curl -sSfL https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_amd64.deb -o /tmp/nfpm.deb
-  #         sudo dpkg -i /tmp/nfpm.deb
-  #         nfpm pkg --packager deb --target dist/ --config packaging/nfpm.yaml
-  #     - uses: softprops/action-gh-release@v2
-  #       with:
-  #         files: dist/*.deb
+  deb:
+    needs: [test, appimage]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build .deb (from PyInstaller one-dir)
+        run: |
+          bash packaging/deb/build-deb.sh
+          ls -lh dist/*.deb
+          sha256sum dist/*.deb
+      - name: Smoke check .deb
+        run: |
+          sudo dpkg -i dist/*.deb || sudo apt-get install -f -y
+          filewizard --help
+          filewizard --version
+          dpkg -L filewizard | head -n 30
+          desktop-file-validate /usr/share/applications/filewizard.desktop || true
+      - name: Upload .deb to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
+          generate_release_notes: false

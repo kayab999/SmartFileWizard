@@ -43,6 +43,20 @@ FileWizard is **not** primarily an AI app. Intelligence (zero-shot, OCR, VLM) is
 
 Build it yourself: `bash packaging/appimage/build.sh` → `dist/FileWizard-0.11.0-x86_64.AppImage` (see `packaging/appimage/README.md`).
 
+### Option A2 — .deb (Debian/Ubuntu, system package)
+
+```bash
+# From Releases
+sudo dpkg -i filewizard_0.11.0_amd64.deb
+sudo apt-get install -f -y  # only if deps missing (libgl1 etc.)
+filewizard --help
+filewizard-ui              # GUI — same engine as AppImage
+```
+
+- Installs to `/opt/filewizard/` (`FileWizard` unified binary + `_internal/`) + shims `/usr/bin/filewizard*` + `filewizard.desktop` + hicolor icon.
+- Same XDG state `~/.local/share/filewizard/` (kept on `apt remove`; wipe with `filewizard reset --all --yes`).
+- Build it yourself: `bash packaging/deb/build-deb.sh` → `dist/filewizard_0.11.0_amd64.deb` (needs `PyInstaller` payload + `nfpm`; reuses `dist/FileWizard/` if present).
+
 ### Option B — From source (developers)
 
 #### Requirements

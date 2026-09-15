@@ -20,20 +20,28 @@ Perception still does not move files.
 3. New conditions: `older_than_days`, `min_aspect`, `max_aspect`.
 4. `packaging/install-desktop.sh` installs `.desktop` + hicolor 256px icon.
 5. **AppImage** `FileWizard-0.11.0-x86_64.AppImage` (PyInstaller + appimagetool, `packaging/appimage/`).
+6. **.deb** `filewizard_0.11.0_amd64.deb` (nfpm from same `dist/FileWizard`, `/opt/filewizard` + `/usr/bin` shims).
 
 ---
 
 ## Install
 
-### End users (AppImage, no Python needed)
+### End users (AppImage / .deb, no Python needed)
 
 ```bash
 # From https://github.com/kayab999/SmartFileWizard/releases/latest
+# AppImage (portable):
 chmod +x FileWizard-0.11.0-x86_64.AppImage
 ./FileWizard-0.11.0-x86_64.AppImage              # GUI or double-click
 ./FileWizard-0.11.0-x86_64.AppImage --help      # CLI
 # FUSE fallback (Ubuntu 24.04 without libfuse2):
 # ./FileWizard-0.11.0-x86_64.AppImage --appimage-extract-and-run --help
+
+# Debian/Ubuntu (.deb):
+sudo dpkg -i filewizard_0.11.0_amd64.deb
+sudo apt-get install -f -y  # deps: libgl1 etc.
+filewizard --help
+filewizard-ui               # GUI — same bundle as AppImage
 ```
 
 ### Developers
@@ -47,9 +55,12 @@ filewizard --version    # FileWizard, version 0.11.0
 filewizard-ui
 bash packaging/install-desktop.sh   # optional app menu (source install only)
 
-# Build the AppImage locally:
+# Build the AppImage / .deb locally:
 bash packaging/appimage/build.sh
 ls -lh dist/FileWizard-*.AppImage
+
+bash packaging/deb/build-deb.sh
+ls -lh dist/*.deb
 ```
 
 ---
@@ -61,6 +72,7 @@ ls -lh dist/FileWizard-*.AppImage
 - [x] `filewizard --version` works
 - [x] `bash packaging/appimage/build.sh` produces `dist/FileWizard-0.11.0-x86_64.AppImage`
 - [x] `dist/FileWizard-*.AppImage --help` and `--appimage-extract-and-run --help` show CLI
+- [x] `bash packaging/deb/build-deb.sh` produces `dist/filewizard_0.11.0_amd64.deb` + `dpkg -i` smoke
 - [x] `desktop-file-validate packaging/filewizard.desktop` passes
 - [ ] Human: GUI intent descargas + cola → segunda preview
 - [ ] Human: double-click AppImage shows splash + home (X11/Wayland)
@@ -77,11 +89,12 @@ git push origin main --tags   # triggers .github/workflows/release.yml → Relea
 | Artifact | Path | Notes |
 |----------|------|-------|
 | AppImage | `dist/FileWizard-0.11.0-x86_64.AppImage` | Portable, double-click; GUI default, CLI via args |
-| AppDir | `dist/FileWizard.AppDir/` | Intermediate (for inspection / .deb via nfpm) |
+| .deb | `dist/filewizard_0.11.0_amd64.deb` | `/opt/filewizard` + `/usr/bin` shims; `dpkg -i` |
+| AppDir | `dist/FileWizard.AppDir/` | Intermediate (for inspection) |
 | PyInstaller one-dir | `dist/FileWizard/` | Tunable via `packaging/appimage/FileWizard.spec` |
 
 ---
 
 ## Not in 0.11.0
 
-Flatpak, inotify daemon, NPU/4B backends. See ROADMAP 0.12+.
+Flatpak (`.desktop` ready, manifest backlog), inotify daemon, NPU/4B backends. See ROADMAP 0.12+.
