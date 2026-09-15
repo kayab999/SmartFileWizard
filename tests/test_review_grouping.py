@@ -3,7 +3,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from filewizard.ui.wizard import ReviewPage
+import pytest
+
+try:
+    from filewizard.ui.wizard import ReviewPage
+except ImportError:
+    pytest.skip("PySide6 not installed — skipping wizard grouping tests", allow_module_level=True)
 
 
 def _op(source: str, dest: str | None, status: str = "planned", rule_id: str = "r"):
