@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# FileWizard AppImage AppRun
+# Launches GUI by default, CLI when CLI args are detected.
+# Works both as AppImage entrypoint and when called via symlinks.
+set -euo pipefail
+HERE="$(dirname "$(readlink -f "${0}")")"
+# Allow Qt to run without display check fallback — wayland vs xcb
+if [ -z "${QT_QPA_PLATFORM:-}" ]; then
+  if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    export QT_QPA_PLATFORM="wayland;xcb"
+  else
+    export QT_QPA_PLATFORM="xcb"
+  fi
+fi
+
+# Resolve the bundled python entrypoint.
+# PyInstaller one-dir build places binaries under usr/bin/FileWizard
+BIN_GUI="$HERE/usr/bin/filewizard-ui"
+BIN_CLI="$HERE/usr/bin/filewizard"
+# Fallback for one-file layout (PyInstaller --onefile)
+if [ ! -x "$BIN_GUI" ]; then BIN_GUI="$HERE/filewizard-ui"; fi
+if [ ! -x "$BIN_CLI" ]; then BIN_CLI="$HERE/filewizard"; fi
+if [ ! -x "$BIN_GUI" ]; then BIN_GUI="$BIN_CLI"; fi
+
+# Also support invoked-as symlink: filewizard / filewizard-ui / filewizard-mcp
+INVOKED="$(basename "$0")"
+
+is_cli_invocation() {
+  # True if first arg looks like a CLI subcommand/flag
+  case "${1:-}" in
+    run|undo|purge|watch|presets|perception|reset|ui|mcp|--help|--version|-h|-V|list|add|remove|import|delete|show|status|models|init|test|serve)
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ "$INVOKED" = "filewizard" ] || [ "$INVOKED" = "filewizard-mcp" ]; then
+  exec "$BIN_CLI" "$@"
+fi
+if [ "$INVOKED" = "filewizard-ui" ]; then
+  exec "$BIN_GUI" "$@"
+fi
+
+# Default: if any CLI-looking arg is present, use CLI binary; else GUI
+if [ $# -gt 0 ] && is_cli_invocation "$1"; then
+  exec "$BIN_CLI" "$@"
+fi
+# Also handle --help passed without subcommand (ambiguous: show GUI help? prefer CLI)
+case "${1:-}" in
+  --help|--version|-h|-V) exec "$BIN_CLI" "$@" ;;
+esac
+
+exec "$BIN_GUI" "$@"

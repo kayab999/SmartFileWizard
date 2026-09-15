@@ -1,0 +1,10 @@
+# Minimal pinned set for AppImage builds.
+# torch/transformers intentionally NOT here (would inflate AppImage >2GB).
+# Build host should install these before PyInstaller.
+pyinstaller>=6,<7
+click>=8.1
+pydantic>=2.7
+PyYAML>=6.0
+pillow>=10.0
+PySide6>=6.6
+mcp>=2.0

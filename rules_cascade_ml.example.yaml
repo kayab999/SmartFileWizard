@@ -1,0 +1,95 @@
+version: 1
+description: Imágenes por cascada de percepción (categoría semántica, no solo nombre)
+
+# Preset de ejemplo cascade-aware (WP-0.5.4).
+# Necesita percepción: profile recommended (cascada ON) o --agent-features.
+#   filewizard run --source ~/Downloads --preset images-cascade-ml \
+#     --perception-profile recommended --limit 50 --verbose
+# Las reglas cascade_* deciden sobre features["cascade"]:
+#   category (factura, recibo, documento_escaneado, captura_pantalla, fotos…)
+#   status   (confirmed | probable | rejected | unknown)
+#   confidence, stage_used
+# `cascade_stage_max` limita a archivos resueltos barato (etapa 0–1, sin OCR/VLM).
+
+rules:
+  - id: screenshots-quick
+    name: Capturas (heurística rápida)
+    priority: 10
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      filename_pattern_any: [screenshot, captura]
+    then:
+      move_to: ~/Pictures/Screenshots/{year}/{month}
+      create_target_dir: true
+      on_collision: append
+
+  - id: invoices-cascade
+    name: Facturas por cascada (categoría)
+    priority: 20
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      cascade_category_any: [factura, recibo]
+      cascade_status_any: [confirmed, probable]
+      cascade_min_confidence: 0.65
+    then:
+      move_to: ~/Documents/Invoices/{year}/{month}
+      create_target_dir: true
+      on_collision: append
+
+  - id: scans-cascade
+    name: Escaneos / formularios por cascada
+    priority: 30
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      cascade_category_any: [documento_escaneado, formulario]
+      cascade_status_any: [confirmed, probable]
+      cascade_min_confidence: 0.55
+      cascade_stage_max: 3
+    then:
+      move_to: ~/Documents/Scans/{year}
+      create_target_dir: true
+      on_collision: append
+
+  - id: ui-screenshots-cascade
+    name: Interfaces / código / diapositivas por cascada
+    priority: 40
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      cascade_category_any: [interfaz_web, codigo, diapositiva]
+      cascade_status_any: [confirmed, probable]
+      cascade_min_confidence: 0.60
+    then:
+      move_to: ~/Pictures/Screenshots/{year}/{month}
+      create_target_dir: true
+      on_collision: append
+
+  - id: photos-cheap
+    name: Fotos resueltas barato (etapa <= 1, sin OCR/VLM)
+    priority: 70
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      cascade_category_any: [foto_persona, foto_paisaje, foto_producto]
+      cascade_stage_max: 1
+    then:
+      move_to: ~/Pictures/Photos/{year}/{month}
+      create_target_dir: true
+      on_collision: append
+
+  # Enrutador dinámico: {cascade_category} usa la etiqueta de la cascada
+  # (slug saneado; "uncategorized" sin evidencia). Evita una regla por
+  # categoría sin perder auditabilidad: el journal guarda la explicación.
+  - id: images-fallback
+    name: Imágenes sin clasificar (por categoría)
+    priority: 100
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+    then:
+      move_to: ~/Pictures/{cascade_category}/{year}/{month}
+      create_target_dir: true
+      on_collision: append

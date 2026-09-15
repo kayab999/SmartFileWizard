@@ -1,0 +1,112 @@
+version: 1
+
+rules:
+  - id: screenshots-by-name
+    name: Capturas por nombre
+    priority: 10
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      filename_pattern_any: [screenshot]
+    then:
+      move_to: ~/Pictures/Screenshots/{year}/{month}
+      rename: "{date}_{original_name}"
+      create_target_dir: true
+      on_collision: append
+
+  - id: screenshots-by-software
+    name: Capturas por software EXIF
+    priority: 12
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      exif_software_contains: [flameshot, screenshot, spectacle, scrot, sharex, gnome]
+    then:
+      move_to: ~/Pictures/Screenshots/{year}/{month}
+      create_target_dir: true
+      on_collision: append
+
+  - id: social-whatsapp-filename
+    name: WhatsApp por nombre (WA + número)
+    priority: 15
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      filename_regex: "(?i)WA[-_]?\\d|whatsapp"
+    then:
+      move_to: ~/Pictures/Social/{year}
+      create_target_dir: true
+      on_collision: append
+
+  - id: camera-photos
+    name: Fotos de cámara
+    priority: 20
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      has_camera_metadata: true
+      not_filename_regex: "(?i)(screenshot|captura|WA[-_]?\\d|whatsapp)"
+    then:
+      move_to: ~/Pictures/Camera/{year}/{month}
+      create_target_dir: true
+      on_collision: append
+
+  - id: social-whatsapp
+    name: WhatsApp / Telegram
+    priority: 30
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      filename_pattern_any: [whatsapp, telegram]
+    then:
+      move_to: ~/Pictures/Social/{year}
+      create_target_dir: true
+      on_collision: append
+
+  - id: scans
+    name: Escaneos / documentos
+    priority: 40
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      max_unique_colors: 64
+      min_width: 1000
+    then:
+      move_to: ~/Documents/Scans/{year}
+      create_target_dir: true
+      on_collision: append
+
+  - id: photos
+    name: Fotografía (paleta rica)
+    priority: 90
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      min_unique_colors: 200
+    then:
+      move_to: ~/Pictures/Photos/{year}/{month}
+      create_target_dir: true
+      on_collision: append
+
+  - id: images-misc
+    name: Cubo de revisión (sin clasificar por la cascada)
+    priority: 100
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+      cascade_status_any: [unknown]
+    then:
+      move_to: ~/Pictures/Review/{year}/{month}
+      create_target_dir: true
+      on_collision: append
+
+  - id: images-fallback
+    name: Red de seguridad (todo lo demás)
+    priority: 110
+    stop_after_match: true
+    when:
+      mime_prefixes: [image/]
+    then:
+      move_to: ~/Pictures/Misc/{year}/{month}
+      create_target_dir: true
+      on_collision: append

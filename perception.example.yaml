@@ -1,0 +1,67 @@
+# Copy to ~/.local/share/filewizard/perception.yaml
+# or: filewizard perception init --profile recommended
+#
+# Defaults product: GLM-OCR (:8080) + Qwen3-VL-2B (:8081)
+# Change `model` / `base_url` for other hardware.
+# Weights are NOT bundled; run your own llama-server (or other OpenAI-compatible endpoint).
+#
+# Known models from the catalog (`filewizard perception models`):
+#   ocr:      glm-ocr | qwen3-vl-2b | qwen2.5-vl-7b
+#   vision:   qwen3-vl-2b | qwen3-vl-4b | qwen2.5-vl-7b
+#   zeroshot: openai/clip-vit-base-patch32 | google/siglip-base-patch16-224
+
+version: 1
+profile: recommended
+heuristics: true
+
+# Cascada: barato primero → OCR → VLM solo si hace falta
+# Ver docs/PLAN_CASCADE.md
+cascade:
+  enabled: true
+  high_confidence: 0.75       # decide en etapa 1 (zero-shot) o 0
+  medium_confidence: 0.50
+  vlm_min_confidence: 0.70    # si el VLM no llega → unknown
+  stage2_keyword_min_hits: 2
+  enable_stage1: true         # CLIP/SigLIP si filewizard[zeroshot]
+  allow_model_download: false # sin esto, CLIP solo si ya está en la caché HF
+  enable_stage2: true         # OCR
+  enable_stage3: true         # VLM JSON
+  zeroshot_model: "openai/clip-vit-base-patch32"
+  # Alternatives: google/siglip-base-patch16-224 (needs [zeroshot] + transformers)
+
+# Disk cache: features keyed by content hash + config fingerprint
+cache:
+  enabled: true
+  max_entries: 5000
+  max_bytes: 67108864         # 64 MiB; entradas compactas (OCR truncado)
+# Files: ~/.local/share/filewizard/perception_cache/
+
+ocr:
+  provider: llama_http          # none | tesseract | llama_http
+  base_url: "http://127.0.0.1:8080/v1"
+  model: "GLM-OCR-Q8_0"
+  timeout_s: 120
+  max_image_edge: 1600
+  temperature: 0.0
+
+vision:
+  provider: llama_http          # none | llama_http
+  base_url: "http://127.0.0.1:8081/v1"
+  model: "Qwen3-VL-2B-Instruct"
+  timeout_s: 120
+  max_image_edge: 1280
+  temperature: 0.0
+  labels:
+    - screenshot
+    - document
+    - photo
+    - scan
+    - invoice
+    - social
+
+# Start servers (example):
+#   llama-server -hf ggml-org/GLM-OCR-GGUF:Q8_0 --port 8080
+#   llama-server -hf <qwen3-vl-2b-gguf-repo> --port 8081
+#
+# Optional stage 1:
+#   pip install -e ".[zeroshot]"

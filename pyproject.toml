@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "filewizard"
+dynamic = ["version"]
+description = "Rule-based file classification, organization and automation engine"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = [
+    "click>=8.1",
+    "pydantic>=2.7",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+images = [
+    "pillow>=10.0",
+]
+ocr = [
+    "pillow>=10.0",
+    "pytesseract>=0.3.10",
+]
+zeroshot = [
+    "pillow>=10.0",
+    "torch>=2.0",
+    "transformers>=4.40",
+]
+ui = [
+    "PySide6>=6.6",
+]
+mcp = [
+    "mcp>=2.0",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+filewizard = "filewizard.cli:cli"
+filewizard-ui = "filewizard.ui.__main__:main"
+filewizard-mcp = "filewizard.mcp:run_stdio"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["filewizard*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "filewizard.__version__"}
+
+[tool.setuptools.package-data]
+filewizard = ["ui/assets/*", "ui/*.qss"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

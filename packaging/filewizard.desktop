@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=FileWizard
+Comment=Organizar archivos con reglas locales (dry-run y undo)
+Exec=filewizard-ui
+Icon=filewizard
+Terminal=false
+Categories=Utility;Filesystem;
+StartupNotify=true
+Keywords=files;organizer;rules;automation;
+StartupWMClass=FileWizard

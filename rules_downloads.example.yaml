@@ -1,0 +1,61 @@
+version: 1
+description: Descargas mixtas — documentos, archivos y media (sin percepción)
+
+# Builtin preset `downloads-docs`. No toca imágenes (usa images-cascade / cascade-ml).
+#   filewizard run --source ~/Downloads --preset downloads-docs --verbose
+
+rules:
+  - id: pdfs
+    name: PDF
+    priority: 10
+    stop_after_match: true
+    when:
+      extensions: [pdf]
+    then:
+      move_to: ~/Documents/PDF/{year}/{month}
+      create_target_dir: true
+      on_collision: append
+
+  - id: office
+    name: Documentos de oficina
+    priority: 20
+    stop_after_match: true
+    when:
+      extensions: [doc, docx, xls, xlsx, ppt, pptx, odt, ods, odp]
+    then:
+      move_to: ~/Documents/Office/{year}
+      create_target_dir: true
+      on_collision: append
+
+  - id: archives
+    name: Archivos comprimidos
+    priority: 30
+    stop_after_match: true
+    when:
+      extensions: [zip, tar, gz, tgz, 7z, rar]
+    then:
+      move_to: ~/Downloads/Archives
+      create_target_dir: true
+      on_collision: append
+
+  - id: videos
+    name: Vídeo
+    priority: 40
+    stop_after_match: true
+    when:
+      extensions: [mp4, mkv, webm, avi, mov]
+    then:
+      move_to: ~/Videos/{year}
+      create_target_dir: true
+      on_collision: append
+
+  - id: audio
+    name: Audio
+    priority: 50
+    stop_after_match: true
+    when:
+      extensions: [mp3, flac, ogg, wav, m4a]
+    then:
+      move_to: ~/Music/{year}
+      create_target_dir: true
+      on_collision: append

@@ -1,0 +1,8 @@
+# Pinned test matrix snapshot (CI 3.11–3.13). Regenerate: pip freeze.
+# Core runtime (matches pyproject lower bounds).
+click==8.4.2
+pydantic==2.13.4
+PyYAML==6.0.3
+# Dev / optional smoke.
+pytest==9.1.1
+pillow==12.3.0

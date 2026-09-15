@@ -1,0 +1,79 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Override version (e.g. 0.11.0); empty = from tag"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # Verify before packaging — reuse the test matrix from test.yml but as a gate.
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (dev only — no display needed)
+        run: pip install -e ".[dev]"
+      - name: pytest
+        run: pytest -q
+      - name: ruff
+        run: pip install ruff && ruff check src/ tests/
+
+  appimage:
+    needs: test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system deps (FUSE + desktop validation)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libfuse2 desktop-file-utils
+
+      - name: Build AppImage
+        run: |
+          bash packaging/appimage/build.sh
+          ls -lh dist/*.AppImage
+          sha256sum dist/*.AppImage
+
+      - name: Smoke check (CLI inside AppImage)
+        run: |
+          chmod +x dist/*.AppImage
+          # --appimage-extract-and-run avoids needing FUSE in CI session
+          dist/FileWizard-*.AppImage --appimage-extract-and-run --help || dist/FileWizard-*.AppImage --help
+          dist/FileWizard-*.AppImage --appimage-extract-and-run --version || dist/FileWizard-*.AppImage --version
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.AppImage
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+  # Optional .deb (kept disabled by default — uncomment to enable)
+  # deb:
+  #   needs: appimage
+  #   runs-on: ubuntu-22.04
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: |
+  #         # build .deb from the same AppDir via nfpm
+  #         curl -sSfL https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_amd64.deb -o /tmp/nfpm.deb
+  #         sudo dpkg -i /tmp/nfpm.deb
+  #         nfpm pkg --packager deb --target dist/ --config packaging/nfpm.yaml
+  #     - uses: softprops/action-gh-release@v2
+  #       with:
+  #         files: dist/*.deb

@@ -1,0 +1,73 @@
+version: 1
+
+rules:
+  - id: screenshots-by-name
+    name: Screenshots por nombre
+    priority: 10
+    stop_after_match: true
+    when:
+      mime_prefixes:
+        - image/
+      filename_regex: "(?i)(screenshot|captura)"
+    then:
+      move_to: "~/Pictures/Screenshots/{year}/{month}"
+      rename: "{date}_{original_name}"
+      create_target_dir: true
+      on_collision: append
+
+  - id: large-images
+    name: Imágenes grandes
+    priority: 20
+    stop_after_match: true
+    when:
+      mime_prefixes:
+        - image/
+      size_gt: 5242880
+      min_width: 2000
+    then:
+      move_to: "~/Pictures/Large/{year}/{month}"
+      create_target_dir: true
+      on_collision: append
+
+  # "total" suelto da falsos positivos (tickets, Excel, memes): se exige
+  # factura|invoice|subtotal. La regla invoices-by-cascade (priority 25)
+  # respalda con status confirmed/probable cuando hay percepción.
+  - id: invoices-by-ocr
+    name: Facturas por OCR
+    priority: 30
+    stop_after_match: true
+    when:
+      mime_prefixes:
+        - image/
+      ocr_contains_any:
+        - factura
+        - invoice
+        - subtotal
+    then:
+      move_to: "~/Documents/Invoices/{year}"
+      create_target_dir: true
+      on_collision: append
+
+  # Requires perception cascade (profile recommended / cascade.enabled)
+  # and optional stage 1–3 models. See perception.example.yaml.
+  # `cascade_stage_max` limits matches to files resolved early (0–1 = cheap,
+  # no VLM); remove it if you accept any stage.
+  - id: invoices-by-cascade
+    name: Facturas por cascada de percepción
+    priority: 25
+    stop_after_match: true
+    when:
+      mime_prefixes:
+        - image/
+      cascade_category_any:
+        - factura
+        - recibo
+      cascade_status_any:
+        - confirmed
+        - probable
+      cascade_min_confidence: 0.65
+      cascade_stage_max: 2
+    then:
+      move_to: "~/Documents/Invoices/{year}/{month}"
+      create_target_dir: true
+      on_collision: append
