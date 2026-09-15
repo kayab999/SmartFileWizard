@@ -82,7 +82,7 @@ dpkg-deb --build "$STAGING" "$DEB_PATH"
 echo "[deb] done:"
 ls -lh "$DEB_PATH"
 echo "[deb] contents (first 40):"
-dpkg-deb -c "$DEB_PATH" | head -n 50
+dpkg-deb -c "$DEB_PATH" | head -n 50 || true
 echo "[deb] SHA256: $(sha256sum "$DEB_PATH" | cut -d' ' -f1)"
 if command -v lintian >/dev/null 2>&1; then
   echo "[deb] lintian (non-fatal):"
