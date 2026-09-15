@@ -81,7 +81,7 @@ excludes = [
 ]
 
 a = Analysis(
-    [str(SRC / "filewizard" / "ui" / "__main__.py"), str(SRC / "filewizard" / "cli.py")],
+    [str(SPEC_DIR / "entry_gui.py"), str(SPEC_DIR / "entry_cli.py")],
     pathex=[str(SRC)],
     binaries=[],
     datas=datas,
