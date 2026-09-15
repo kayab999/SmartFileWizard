@@ -8,11 +8,16 @@ GUI is the default entry; CLI is preserved via a second executable
 that shares the same collected dependencies (one-dir mode).
 """
 
+import os
 import sys
 from pathlib import Path
 
 # Resolve project root (spec is at packaging/appimage/FileWizard.spec)
-SPEC_DIR = Path(__file__).parent.resolve()
+# PyInstaller >=6 exposes SPECPATH; fallback to __file__ for manual runs.
+try:
+    SPEC_DIR = Path(SPECPATH).resolve()  # type: ignore[name-defined]
+except NameError:
+    SPEC_DIR = Path(__file__).parent.resolve()
 ROOT = SPEC_DIR.parent.parent.resolve()
 SRC = ROOT / "src"
 
