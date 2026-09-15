@@ -3,12 +3,15 @@
 # Needs: dist/FileWizard already built (via packaging/appimage/build.sh --no-appimage)
 #        or will build it if missing.
 # Produces: dist/filewizard_*_amd64.deb
+# Uses dpkg-deb staging (no nfpm required) for reliable recursive copies.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 VERSION="$(python3 -c 'import sys; sys.path.insert(0, "src"); import filewizard; print(filewizard.__version__)')"
 DIST="$ROOT/dist"
 ARCH="${ARCH:-amd64}"
+DEB_ARCH="amd64"
+STAGING="$ROOT/build/deb-root"
 
 echo "[deb] FileWizard $VERSION arch=$ARCH"
 echo "[deb] ROOT=$ROOT"
@@ -19,54 +22,71 @@ if [ ! -d "$DIST/FileWizard" ]; then
   bash packaging/appimage/build.sh --no-appimage
 fi
 
-# Validate payload
 if [ ! -x "$DIST/FileWizard/FileWizard" ]; then
   echo "ERROR: $DIST/FileWizard/FileWizard not executable" >&2
   ls -lh "$DIST/FileWizard/" | head -n 20 >&2
   exit 1
 fi
 
-# Render nfpm.yaml with current version (templated if needed)
-NFPM_CFG="/tmp/nfpm.filewizard.yaml"
-# Use the committed packaging/nfpm.yaml as template, patch version line
-sed -E "s/^(version:).*/\1 $VERSION/" packaging/nfpm.yaml > "$NFPM_CFG"
-echo "[deb] nfpm config $NFPM_CFG:"
-cat "$NFPM_CFG"
+# Clean staging
+rm -rf "$STAGING"
+mkdir -p "$STAGING/DEBIAN" "$STAGING/opt/filewizard" "$STAGING/usr/bin" "$STAGING/usr/share/applications" "$STAGING/usr/share/icons/hicolor/256x256/apps"
 
-# Ensure nfpm is available
-if ! command -v nfpm >/dev/null 2>&1; then
-  echo "[deb] nfpm not found, installing ..."
-  TMP_DEB="/tmp/nfpm_${ARCH}.deb"
-  # goreleaser/nfpm: try the canonical latest URL, fallback to API-discovered asset
-  if ! curl -sSfL -o "$TMP_DEB" "https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_amd64.deb" 2>/dev/null; then
-    echo "[deb] primary nfpm URL 404, resolving via GitHub API ..."
-    NFPM_URL="$(curl -s https://api.github.com/repos/goreleaser/nfpm/releases/latest | python3 -c 'import sys, json; data=json.load(sys.stdin); print(next((a["browser_download_url"] for a in data.get("assets",[]) if a["name"].endswith("amd64.deb")), ""))')"
-    if [ -z "$NFPM_URL" ] || [ "$NFPM_URL" = "" ]; then
-      echo "ERROR: could not resolve nfpm .deb URL from GitHub API" >&2
-      exit 1
-    fi
-    echo "[deb] downloading $NFPM_URL ..."
-    curl -sSfL -o "$TMP_DEB" "$NFPM_URL"
-  fi
-  sudo dpkg -i "$TMP_DEB" || sudo apt-get install -f -y
-fi
-nfpm --version
+# Copy payload (preserves _internal + libs)
+echo "[deb] staging payload ..."
+cp -a "$DIST/FileWizard/." "$STAGING/opt/filewizard/"
+chmod +x "$STAGING/opt/filewizard/FileWizard"
 
-# Build
-echo "[deb] building .deb ..."
-# nfpm 2.x: nfpm pkg --packager deb --target dist/ --config /tmp/...
-nfpm pkg --packager deb --target "$DIST/" --config "$NFPM_CFG"
+# Desktop + icon
+install -m 644 packaging/filewizard.desktop "$STAGING/usr/share/applications/filewizard.desktop"
+install -m 644 src/filewizard/ui/assets/app_icon_256.png "$STAGING/usr/share/icons/hicolor/256x256/apps/filewizard.png"
+
+# Symlink shims (small shell wrappers calling the unified binary)
+install -m 755 packaging/deb/bin-filewizard "$STAGING/usr/bin/filewizard"
+install -m 755 packaging/deb/bin-filewizard-ui "$STAGING/usr/bin/filewizard-ui"
+install -m 755 packaging/deb/bin-filewizard-mcp "$STAGING/usr/bin/filewizard-mcp"
+
+# Control file
+cat > "$STAGING/DEBIAN/control" <<EOF
+Package: filewizard
+Version: $VERSION
+Section: utils
+Priority: optional
+Architecture: $DEB_ARCH
+Maintainer: Kayab Software <kayab999@users.noreply.github.com>
+Homepage: https://github.com/kayab999/SmartFileWizard
+Description: Local-first file classification and organization engine for Linux
+ Rule-based moves with dry-run, journal undo, cascade perception.
+ .
+ The .deb bundles the same PyInstaller payload as the AppImage
+ (/opt/filewizard) plus desktop entry and icons. User data stays
+ in ~/.local/share/filewizard and is preserved on removal.
+Depends: libgl1, libxcb-xinerama0 | libxcb1, libxkbcommon0, libdbus-1-3
+Recommends: tesseract-ocr
+Suggests: llama-server
+EOF
+
+cat "$STAGING/DEBIAN/control"
+
+# Maintainer scripts
+install -m 755 packaging/deb/postinstall.sh "$STAGING/DEBIAN/postinst"
+install -m 755 packaging/deb/postremove.sh "$STAGING/DEBIAN/postrm"
+
+# Build deb
+DEB_NAME="filewizard_${VERSION}_${DEB_ARCH}.deb"
+DEB_PATH="$DIST/$DEB_NAME"
+echo "[deb] building $DEB_PATH ..."
+rm -f "$DEB_PATH"
+dpkg-deb --build "$STAGING" "$DEB_PATH"
 
 echo "[deb] done:"
-ls -lh "$DIST"/*.deb 2>/dev/null || ls -lh "$DIST"/filewizard*.deb 2>/dev/null
-DEB="$(ls -1 "$DIST"/*.deb 2>/dev/null | head -n1)"
-if [ -n "${DEB:-}" ]; then
-  echo "[deb] SHA256: $(sha256sum "$DEB" | cut -d' ' -f1)"
-  # quick lint if available
-  if command -v lintian >/dev/null 2>&1; then
-    echo "[deb] lintian (non-fatal):"
-    lintian "$DEB" || true
-  fi
-  echo ""
-  echo "Install test (dry): sudo dpkg -i \"$DEB\" && filewizard --help && filewizard-ui --help"
+ls -lh "$DEB_PATH"
+echo "[deb] contents (first 40):"
+dpkg-deb -c "$DEB_PATH" | head -n 50
+echo "[deb] SHA256: $(sha256sum "$DEB_PATH" | cut -d' ' -f1)"
+if command -v lintian >/dev/null 2>&1; then
+  echo "[deb] lintian (non-fatal):"
+  lintian "$DEB_PATH" || true
 fi
+echo ""
+echo "Test: sudo dpkg -i \"$DEB_PATH\" && filewizard --help && filewizard --version && dpkg -L filewizard | head"
