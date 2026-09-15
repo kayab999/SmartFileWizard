@@ -26,7 +26,7 @@ jobs:
       - name: pytest
         run: pytest -q
       - name: ruff
-        run: pip install ruff && ruff check src/ tests/
+        run: pip install "ruff==0.15.15" && ruff check src/ tests/
 
   appimage:
     needs: test
