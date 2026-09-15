@@ -40,7 +40,7 @@ if ! command -v nfpm >/dev/null 2>&1; then
   # goreleaser/nfpm: try the canonical latest URL, fallback to API-discovered asset
   if ! curl -sSfL -o "$TMP_DEB" "https://github.com/goreleaser/nfpm/releases/latest/download/nfpm_amd64.deb" 2>/dev/null; then
     echo "[deb] primary nfpm URL 404, resolving via GitHub API ..."
-    NFPM_URL="$(curl -s https://api.github.com/repos/goreleaser/nfpm/releases/latest | python3 -c 'import sys, json; data=json.load(sys.stdin); print(next((a[\"browser_download_url\"] for a in data.get(\"assets\",[]) if a[\"name\"].endswith(\"amd64.deb\")), \"\"))')"
+    NFPM_URL="$(curl -s https://api.github.com/repos/goreleaser/nfpm/releases/latest | python3 -c 'import sys, json; data=json.load(sys.stdin); print(next((a["browser_download_url"] for a in data.get("assets",[]) if a["name"].endswith("amd64.deb")), ""))')"
     if [ -z "$NFPM_URL" ] || [ "$NFPM_URL" = "" ]; then
       echo "ERROR: could not resolve nfpm .deb URL from GitHub API" >&2
       exit 1
