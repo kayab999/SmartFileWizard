@@ -69,6 +69,8 @@ class PreviewWorker(QThread):
         self.options = options
         self.state_dir = state_dir
         self.cancel_token = CancelToken()
+        self.scan_errors: list[str] = []
+        self.source: Path | None = None
 
     def request_cancel(self) -> None:
         self.cancel_token.cancel()
@@ -86,6 +88,8 @@ class PreviewWorker(QThread):
             )
 
             source = Path(str(self.options.get("source"))).expanduser().resolve()
+            self.source = source
+            self.scan_errors = []
             include_hidden = bool(self.options.get("include_hidden", False))
 
             limit_value = int(self.options.get("limit", 0) or 0)
@@ -124,6 +128,7 @@ class PreviewWorker(QThread):
                     on_facts=_on_facts,
                     cancel=self.cancel_token,
                     allow_model_only=bool(self.options.get("allow_model_only")),
+                    scan_errors=self.scan_errors,
                 )
 
             for op in operations:

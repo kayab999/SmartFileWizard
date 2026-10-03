@@ -191,7 +191,7 @@ YAML-only cascade fields (presets / rules files) are listed in §5.9.
 
 #### Step 4 — Revisar (Review)
 
-1. FileWizard **previews** without moving files.
+1. FileWizard **previews** without moving files. The summary is the plan: source, how many files and bytes, destinations, the rule checks that passed, the collision policy, and any paths that could not be read.
 2. Tree grouped by **destination folder** (counts, expand children).
 3. Double-click a row for detail / thumbnail / **Mover a…** override.
 4. Confirm **Aplicar** to execute.
@@ -262,6 +262,8 @@ If there is no tray, close still quits (same as before).
 - Preview never moves files.
 - Apply asks for confirmation.
 - Closing a busy window cancels after the current file and waits until that work stops. **Salir** on the home window quits, including when the app is in the tray. The first close that only hides the window says so in a tray message.
+- A file that changes between preview and apply is left in place (`stale`). `replace` keeps the previous file so undo can put it back.
+- A non-loopback OCR or vision URL is not called unless `allow_remote: true` is set in `perception.yaml`.
   (cancels when possible; an in-flight OCR/VLM call may finish its timeout).
 - Undo uses the same journal as the CLI (by batch).
 - Journal rows may show cascade evidence (category / stage / confidence).
@@ -597,8 +599,11 @@ or, using the dedicated script:
   `filewizard_undo_batch` return
   `Jail no configurado: Operaciones de escritura deshabilitadas` until
   `allowed_roots` or `FILEWIZARD_SOURCE_ROOT` is set. `confirm=true` does not
-  bypass a path outside those roots. If `mcp.yaml` exists but is unreadable,
-  MCP mutate tools **fail closed**.
+  bypass a path outside those roots. A caller `state_dir` must be the
+  canonical state directory or lie inside those roots; otherwise the tool
+  writes nothing. A plan may still create builtin preset files in that
+  state directory. If `mcp.yaml` exists but is unreadable, MCP mutate tools
+  **fail closed**.
 - **`filewizard_collect_facts` is jailed** like plan/execute when roots are
   set; `filewizard_undo_batch` refuses batches touching paths outside roots
   (fail-closed, dry-run included).

@@ -223,6 +223,9 @@ def _check_relocated(row: dict) -> str | None:
     problem = _require_size(destination, row.get("byte_size"), "destination")
     if problem:
         return problem
+    problem = _require_hash(destination, row.get("content_sha256"), "destination")
+    if problem:
+        return problem
     try:
         if source.exists():
             return f"source still present: {source}"
@@ -240,6 +243,9 @@ def _check_undone(row: dict, undo_done: list[dict]) -> str | None:
     if problem:
         return problem
     problem = _require_size(restored, row.get("byte_size"), "restored file")
+    if problem:
+        return problem
+    problem = _require_hash(restored, row.get("content_sha256"), "restored file")
     if problem:
         return problem
     if destination is not None and _key(destination) != _key(restored):
@@ -283,6 +289,20 @@ def _require_regular(path: Path, role: str) -> str | None:
             return f"{role} {path}: not a regular file"
     except OSError as exc:
         return f"cannot inspect {role} {path} ({exc})"
+    return None
+
+
+def _require_hash(path: Path, recorded: object, role: str) -> str | None:
+    if not isinstance(recorded, str) or not recorded:
+        return None
+    from .perception.cache import file_content_hash
+
+    try:
+        actual = file_content_hash(path)
+    except OSError as exc:
+        return f"cannot hash {role} {path} ({exc})"
+    if actual != recorded:
+        return f"{role} {path}: content hash does not match journal"
     return None
 
 
@@ -388,10 +408,13 @@ def _select_rows(connection: sqlite3.Connection) -> list[dict]:
         )
     size_sql = "byte_size" if "byte_size" in columns else "NULL AS byte_size"
     created_sql = "created_at" if "created_at" in columns else "NULL AS created_at"
+    hash_sql = (
+        "content_sha256" if "content_sha256" in columns else "NULL AS content_sha256"
+    )
     cursor = connection.execute(
         f"""
         SELECT id, batch_id, op, source, destination, status,
-               {size_sql}, {created_sql}
+               {size_sql}, {created_sql}, {hash_sql}
         FROM operations
         ORDER BY id
         """

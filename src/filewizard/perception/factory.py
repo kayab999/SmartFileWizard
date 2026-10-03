@@ -102,7 +102,9 @@ def build_extractors(
     if ocr_provider == "tesseract":
         extractors.append(TesseractOcrExtractor(cfg.ocr))
     elif ocr_provider == "llama_http":
-        extractors.append(LlamaHttpOcrExtractor(cfg.ocr))
+        extractors.append(
+            LlamaHttpOcrExtractor(cfg.ocr, allow_remote=cfg.allow_remote)
+        )
 
     use_vision = cfg.vision.provider == "llama_http" and (
         force_vision
@@ -113,7 +115,9 @@ def build_extractors(
         use_vision = True
 
     if use_vision and cfg.vision.provider == "llama_http":
-        extractors.append(LlamaHttpVisionExtractor(cfg.vision))
+        extractors.append(
+            LlamaHttpVisionExtractor(cfg.vision, allow_remote=cfg.allow_remote)
+        )
 
     return _maybe_wrap_cache(extractors, cfg, state_dir=state_dir)
 

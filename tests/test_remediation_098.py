@@ -155,7 +155,7 @@ def test_i9_cli_warns_remote(tmp_path: Path) -> None:
     assert "outside this machine" in result.output
 
 
-def test_i9_mcp_warnings_key(tmp_path: Path) -> None:
+def test_i9_mcp_warnings_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from filewizard.mcp.tools import filewizard_plan
 
     src = tmp_path / "src"
@@ -169,7 +169,11 @@ def test_i9_mcp_warnings_key(tmp_path: Path) -> None:
         f"    then: {{move_to: '{tmp_path / 'out'}'}}\n",
         encoding="utf-8",
     )
-    payload = filewizard_plan(src, tmp_path / "state", rules=rules)
+    state = tmp_path / "state"
+    monkeypatch.setattr(
+        "filewizard.mcp.tools.presets_default_state_dir", lambda: state
+    )
+    payload = filewizard_plan(src, state, rules=rules)
     assert payload["ok"] is True
     assert payload["warnings"] == []
 
@@ -380,7 +384,9 @@ def test_i12_server_wrappers_forward_agent_features() -> None:
     assert src.count("agent_features=agent_features") >= 2
 
 
-def test_i12_op_dict_carries_perception(tmp_path: Path) -> None:
+def test_i12_op_dict_carries_perception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from filewizard.mcp.tools import filewizard_plan
 
     src = tmp_path / "src"
@@ -394,13 +400,19 @@ def test_i12_op_dict_carries_perception(tmp_path: Path) -> None:
         f"    then: {{move_to: '{tmp_path / 'out'}'}}\n",
         encoding="utf-8",
     )
-    payload = filewizard_plan(src, tmp_path / "state", rules=rules)
+    state = tmp_path / "state"
+    monkeypatch.setattr(
+        "filewizard.mcp.tools.presets_default_state_dir", lambda: state
+    )
+    payload = filewizard_plan(src, state, rules=rules)
     assert payload["ok"] is True
     op = payload["operations"][0]
     assert "perception" in op
 
 
-def test_i12_plan_accepts_agent_features_dict(tmp_path: Path) -> None:
+def test_i12_plan_accepts_agent_features_dict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from filewizard.mcp.tools import filewizard_plan
 
     src = tmp_path / "src"
@@ -415,9 +427,13 @@ def test_i12_plan_accepts_agent_features_dict(tmp_path: Path) -> None:
         f"    then: {{move_to: '{tmp_path / 'out'}'}}\n",
         encoding="utf-8",
     )
+    state = tmp_path / "state"
+    monkeypatch.setattr(
+        "filewizard.mcp.tools.presets_default_state_dir", lambda: state
+    )
     payload = filewizard_plan(
         src,
-        tmp_path / "state",
+        state,
         rules=rules,
         agent_features={str(target.resolve()): {"cascade": {"category": "factura"}}},
     )

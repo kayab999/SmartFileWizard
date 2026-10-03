@@ -17,6 +17,7 @@ DEFAULT_IGNORED_DIRS = {
 def iter_files(
     root: Path,
     include_hidden: bool = False,
+    on_error=None,
 ):
     """
     Iterate regular files recursively.
@@ -38,8 +39,9 @@ def iter_files(
         return
 
     def _on_walk_error(err: OSError) -> None:
-        # Permissions, vanished dirs, etc. — skip and continue.
-        return None
+        # Permissions, vanished dirs, etc. — record and continue.
+        if on_error is not None:
+            on_error(err)
 
     for dirpath, dirnames, filenames in os.walk(
         root,
@@ -69,8 +71,10 @@ def iter_files(
                     continue
                 if not path.is_file():
                     continue
-            except OSError:
+            except OSError as exc:
                 # Permission denied, vanished mid-scan, etc.
+                if on_error is not None:
+                    on_error(exc)
                 continue
 
             yield path

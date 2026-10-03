@@ -127,6 +127,33 @@ JAIL_UNCONFIGURED = (
 )
 
 
+STATE_DIR_DENIED = (
+    "state_dir is outside the canonical state directory and allowed_roots."
+)
+
+
+def _confine_state_dir(
+    tool: str,
+    state_dir: Path | str | None,
+    roots: list[Path],
+) -> tuple[Path | None, dict | None]:
+    """Return the state directory MCP may write, or a structured error.
+
+    Omitted means the canonical directory. Any other path must sit inside
+    ``allowed_roots``.
+    """
+    canonical = presets_default_state_dir().expanduser().resolve()
+    if state_dir is None:
+        return canonical, None
+    try:
+        state = Path(state_dir).expanduser().resolve()
+    except OSError as exc:
+        return None, result_error(tool, f"state_dir: {exc}")
+    if state == canonical or (roots and _path_within(state, roots)):
+        return state, None
+    return None, result_error(tool, STATE_DIR_DENIED)
+
+
 def _require_write_jail(tool: str, roots: list[Path]) -> dict | None:
     if not roots:
         return result_error(tool, JAIL_UNCONFIGURED)
@@ -415,12 +442,15 @@ def filewizard_plan(
     """
     try:
         src = Path(source).expanduser().resolve()
-        state = _state_root(state_dir).resolve()
-        ensure_builtin_presets(state)  # same seeding as CLI run
         try:
             roots = mcp_allowed_roots(mcp_jail_config_dir())
         except McpJailError as exc:
             return result_error("filewizard_plan", str(exc))
+        state, denied = _confine_state_dir("filewizard_plan", state_dir, roots)
+        if denied is not None:
+            return denied
+        assert state is not None
+        ensure_builtin_presets(state)  # presets only, inside the confined dir
         blocked = _check_source_root("filewizard_plan", src, roots)
         if blocked is not None:
             return blocked
@@ -436,6 +466,7 @@ def filewizard_plan(
 
         with Journal(Path(":memory:")) as journal:  # plan writes nothing
             executor = Executor(journal=journal, dry_run=True)
+            scan_errors: list[str] = []
             operations, scanned = plan_operations(
                 source=src,
                 rules=ruleset,
@@ -443,6 +474,7 @@ def filewizard_plan(
                 extractors=extractors,
                 limit=lim,
                 allow_model_only=allow_model_only,
+                scan_errors=scan_errors,
             )
         _apply_destination_jail(operations, roots)
     except Exception as exc:
@@ -458,6 +490,7 @@ def filewizard_plan(
         "perception_profile": perception_profile,
         "scanned": scanned,
         "warnings": _remote_warnings(state, perception_profile),
+        "scan_errors": scan_errors,
         "operations": [_op_to_dict(op) for op in operations],
     }
 
@@ -492,10 +525,13 @@ def filewizard_execute(
     blocked_jail = _require_write_jail("filewizard_execute", roots)
     if blocked_jail is not None:
         return blocked_jail
+    state, denied = _confine_state_dir("filewizard_execute", state_dir, roots)
+    if denied is not None:
+        return denied
+    assert state is not None
 
     try:
         src = Path(source).expanduser().resolve()
-        state = _state_root(state_dir).resolve()
         ensure_builtin_presets(state)  # same seeding as CLI run
         blocked = _check_source_root("filewizard_execute", src, roots)
         if blocked is not None:
@@ -575,7 +611,15 @@ def filewizard_undo_batch(
             return blocked_jail
 
     try:
-        state = _state_root(state_dir).resolve()
+        roots = mcp_allowed_roots(mcp_jail_config_dir())
+    except McpJailError as exc:
+        return result_error("filewizard_undo_batch", str(exc))
+    state, denied = _confine_state_dir("filewizard_undo_batch", state_dir, roots)
+    if denied is not None:
+        return denied
+    assert state is not None
+
+    try:
         db = state / "journal.db"
         if not db.is_file():
             return result_error("filewizard_undo_batch", f"Journal not found: {db}")
@@ -636,12 +680,17 @@ def filewizard_apply_agent_labels(
     if source is not None:
         try:
             src = Path(source).expanduser().resolve()
-            state = _state_root(state_dir).resolve()
-            ensure_builtin_presets(state)  # same seeding as CLI run
             try:
                 roots = mcp_allowed_roots(mcp_jail_config_dir())
             except McpJailError as exc:
                 return result_error("filewizard_apply_agent_labels", str(exc))
+            state, denied = _confine_state_dir(
+                "filewizard_apply_agent_labels", state_dir, roots
+            )
+            if denied is not None:
+                return denied
+            assert state is not None
+            ensure_builtin_presets(state)  # presets only, inside the confined dir
             blocked = _check_source_root(
                 "filewizard_apply_agent_labels", src, roots
             )

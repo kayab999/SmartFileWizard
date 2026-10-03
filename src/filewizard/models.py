@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Condition(BaseModel):
@@ -11,7 +11,10 @@ class Condition(BaseModel):
     Conditions a file must satisfy to activate a rule.
 
     If always=true, the rule matches immediately.
+    Unknown fields are rejected so a typo cannot silently drop a check.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     always: bool = False
 
@@ -70,6 +73,50 @@ class Condition(BaseModel):
             raise ValueError(f"Invalid regex {value!r}: {exc}") from exc
         return value
 
+    @field_validator(
+        "size_gt",
+        "size_lt",
+        "older_than_days",
+        "min_width",
+        "min_height",
+        "min_unique_colors",
+        "max_unique_colors",
+        "cascade_stage_max",
+    )
+    @classmethod
+    def _non_negative(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("must be >= 0")
+        return value
+
+    @field_validator("min_aspect", "max_aspect")
+    @classmethod
+    def _positive_aspect(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("must be > 0")
+        return value
+
+    @field_validator("cascade_min_confidence")
+    @classmethod
+    def _unit_interval(cls, value: float | None) -> float | None:
+        if value is not None and not 0.0 <= value <= 1.0:
+            raise ValueError("must be between 0 and 1")
+        return value
+
+    @field_validator("vision_label_gt")
+    @classmethod
+    def _vision_scores(
+        cls, value: dict[str, float] | None
+    ) -> dict[str, float] | None:
+        if not value:
+            return value
+        for label, score in value.items():
+            if not 0.0 <= float(score) <= 1.0:
+                raise ValueError(
+                    f"vision score for {label!r} must be between 0 and 1"
+                )
+        return value
+
 
 class Action(BaseModel):
     """
@@ -81,6 +128,8 @@ class Action(BaseModel):
     rename may be a template:
       {date}_{original_name}
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     move_to: str | None = None
     rename: str | None = None
@@ -94,6 +143,8 @@ class Action(BaseModel):
 
 
 class Rule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     name: str
     priority: int = 100
@@ -112,5 +163,11 @@ class Rule(BaseModel):
 
 
 class RuleSet(BaseModel):
+    """Rule file. ``name`` and ``description`` are accepted and ignored by the engine."""
+
+    model_config = ConfigDict(extra="forbid")
+
     version: int = 1
+    name: str | None = None
+    description: str | None = None
     rules: list[Rule]

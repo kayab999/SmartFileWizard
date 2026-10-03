@@ -400,6 +400,9 @@ class ActionPage(QWidget):
 
         self.on_collision = QComboBox()
         self.on_collision.addItems(["append", "skip", "replace"])
+        self.on_collision.setToolTip(
+            "replace guarda el archivo anterior y el deshacer lo devuelve."
+        )
 
         collision = str(intent.action.get("on_collision", "append"))
         collision_index = self.on_collision.findText(collision)
@@ -509,6 +512,9 @@ class ReviewPage(QWidget):
 
         self._operations: list[Any] = []
         self._groups: dict[str, list[int]] = {}
+        self.source: str | None = None
+        self.scanned: int | None = None
+        self.scan_errors: list[str] = []
 
         layout = QVBoxLayout(self)
 
@@ -590,8 +596,13 @@ class ReviewPage(QWidget):
         self,
         operations: list[Any],
         scanned: int | None = None,
+        source: str | None = None,
+        scan_errors: list[str] | None = None,
     ) -> None:
         self._operations = list(operations)
+        self.scanned = scanned
+        self.source = source
+        self.scan_errors = list(scan_errors or [])
         self._groups = {}
         self.tree.clear()
 
@@ -634,39 +645,16 @@ class ReviewPage(QWidget):
             parent.addChild(placeholder)
             self.tree.addTopLevelItem(parent)
 
-        ready = sum(
-            1
-            for op in operations
-            if op.status in {"planned", "dry-run", "done", "manual"}
-        )
-        needs_review = sum(1 for op in operations if op.status == "error")
-        ignored = sum(
-            1 for op in operations if op.status in {"skipped", "noop"}
-        )
+        from ..plan_brief import plan_brief
 
-        lines = [
-            f"✓  {ready} se organizarán / se organizaron / manual",
-            f"⚠  {needs_review} requieren revisión",
-            f"○  {ignored} se ignorarán / se ignoraron",
-            f"📁 {len(self._groups)} carpetas destino",
-        ]
-
-        counts = Counter(op.status for op in operations)
-        detail = " | ".join(
-            f"{status}: {count}" for status, count in counts.items()
-        )
-        if detail:
-            lines.append(detail)
-
-        if scanned is not None:
-            lines.insert(0, f"Archivos escaneados: {scanned}")
-
-        if not operations:
-            self.summary.setText(
-                "Sin operaciones planificadas. Ajusta condiciones o carpeta origen."
+        self.summary.setText(
+            plan_brief(
+                operations,
+                source=self.source,
+                scanned=scanned,
+                scan_errors=self.scan_errors,
             )
-        else:
-            self.summary.setText("\n".join(lines))
+        )
 
     def _populate_group_children(self, item: QTreeWidgetItem) -> None:
         if item.parent() is not None:
@@ -1106,7 +1094,11 @@ class WizardDialog(QDialog):
         scanned: int,
         error: str,
     ) -> None:
+        scan_errors: list[str] = []
+        source = None
         if self.worker is not None:
+            scan_errors = list(getattr(self.worker, "scan_errors", []))
+            source = getattr(self.worker, "source", None)
             self.worker.deleteLater()
 
         self.worker = None
@@ -1130,7 +1122,12 @@ class WizardDialog(QDialog):
         else:
             self.operations = operations
             self.scanned = scanned
-            self.page_review.load_operations(operations, scanned)
+            self.page_review.load_operations(
+                operations,
+                scanned,
+                source=str(source) if source else None,
+                scan_errors=scan_errors,
+            )
             from ..review_queue import ReviewQueue
 
             pending = len(ReviewQueue(state_dir=self.state_dir).pending())
@@ -1161,10 +1158,16 @@ class WizardDialog(QDialog):
             )
             return
 
+        from ..plan_brief import plan_brief
+
         message = (
-            f"Se van a aplicar {len(planned)} operaciones.\n\n"
-            "Esto puede mover o renombrar archivos.\n\n"
-            "¿Continuar?"
+            plan_brief(
+                self.operations,
+                source=self.page_review.source,
+                scanned=self.page_review.scanned,
+                scan_errors=self.page_review.scan_errors,
+            )
+            + "\n\n¿Continuar?"
         )
 
         reply = QMessageBox.question(
@@ -1218,17 +1221,19 @@ class WizardDialog(QDialog):
             )
         else:
             self.operations = results
-            self.page_review.load_operations(results, self.scanned)
+            self.page_review.load_operations(
+                results,
+                self.scanned,
+                source=self.page_review.source,
+                scan_errors=self.page_review.scan_errors,
+            )
 
-            counts = Counter(op.status for op in results)
-            lines = [f"{status}: {count}" for status, count in counts.items()]
+            from ..plan_brief import result_brief
 
             QMessageBox.information(
                 self,
                 "FileWizard",
-                "Operación completada.\n\n"
-                + "\n".join(lines)
-                + "\n\nPuedes deshacer desde el Journal de la ventana principal.",
+                "Operación completada.\n\n" + result_brief(results),
             )
 
             if self.page_review.open_folder_after.isChecked():

@@ -35,6 +35,8 @@ def _facts(path: Path, **features) -> FileFacts:
 
 
 def test_reconcile_pending_promotes_landed_move(tmp_path: Path) -> None:
+    from filewizard.perception.cache import file_content_hash
+
     source = tmp_path / "a.txt"
     dest = tmp_path / "out" / "a.txt"
     source.write_text("hello", encoding="utf-8")
@@ -46,6 +48,7 @@ def test_reconcile_pending_promotes_landed_move(tmp_path: Path) -> None:
         source=source,
         destination=dest,
         byte_size=source.stat().st_size,
+        content_sha256=file_content_hash(source),
     )
     dest.parent.mkdir()
     dest.write_text("hello", encoding="utf-8")

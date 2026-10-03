@@ -141,6 +141,7 @@ def plan_operations(
     on_facts: Callable[..., None] | None = None,
     cancel: CancelToken | None = None,
     allow_model_only: bool = False,
+    scan_errors: list[str] | None = None,
 ) -> tuple[list[PlannedOperation], int]:
     """
     Shared scan → facts → match → plan pipeline used by CLI and UI.
@@ -168,7 +169,15 @@ def plan_operations(
     if only_paths is not None:
         resolved_only = {Path(p).expanduser().resolve() for p in only_paths}
 
-    for path in iter_files(source, include_hidden=include_hidden):
+    def _scan_error(err: OSError) -> None:
+        if scan_errors is not None:
+            scan_errors.append(f"{getattr(err, 'filename', '')}: {err}")
+
+    for path in iter_files(
+        source,
+        include_hidden=include_hidden,
+        on_error=_scan_error if scan_errors is not None else None,
+    ):
         if resolved_only is not None and path.resolve() not in resolved_only:
             continue
 

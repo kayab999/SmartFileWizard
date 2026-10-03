@@ -65,6 +65,8 @@ class CacheSettings(BaseModel):
 class PerceptionConfig(BaseModel):
     version: int = 1
     heuristics: bool = True
+    # Non-loopback OCR/vision URLs are not called unless this is true.
+    allow_remote: bool = False
     ocr: OcrSettings = Field(default_factory=OcrSettings)
     vision: VisionSettings = Field(default_factory=VisionSettings)
     cascade: CascadeSettings = Field(default_factory=CascadeSettings)

@@ -7,7 +7,11 @@ from typing import Any
 
 from ..facts import IMAGE_EXTENSIONS
 from .config import OcrSettings, VisionSettings
-from .http_openai import chat_completion_with_image, parse_vision_json
+from .http_openai import (
+    chat_completion_with_image,
+    host_is_loopback,
+    parse_vision_json,
+)
 from .prompts import ocr_user_prompt, vision_labels_prompt
 
 logger = logging.getLogger(__name__)
@@ -40,6 +44,8 @@ class TesseractOcrExtractor:
                 }
             }
         try:
+            # image_to_string blocks until Tesseract exits. Cancel is
+            # observed only after this call returns.
             with Image.open(path) as img:
                 if self.settings.langs:
                     text = pytesseract.image_to_string(
@@ -63,15 +69,28 @@ class TesseractOcrExtractor:
             }
 
 
+def _remote_blocked(base_url: str, allow_remote: bool) -> str | None:
+    if allow_remote or host_is_loopback(base_url):
+        return None
+    return (
+        "remote perception is disabled "
+        f"({base_url}); set allow_remote: true to send file bytes"
+    )
+
+
 class LlamaHttpOcrExtractor:
     name = "ocr"
 
-    def __init__(self, settings: OcrSettings):
+    def __init__(self, settings: OcrSettings, *, allow_remote: bool = False):
         self.settings = settings
+        self.allow_remote = allow_remote
 
     def extract(self, path: Path) -> dict[str, Any]:
         if not _is_image(path):
             return {}
+        blocked = _remote_blocked(self.settings.base_url, self.allow_remote)
+        if blocked:
+            return {"ocr": {"error": blocked, "provider": "llama_http"}}
         try:
             content = chat_completion_with_image(
                 base_url=self.settings.base_url,
@@ -103,12 +122,22 @@ class LlamaHttpOcrExtractor:
 class LlamaHttpVisionExtractor:
     name = "vision"
 
-    def __init__(self, settings: VisionSettings):
+    def __init__(self, settings: VisionSettings, *, allow_remote: bool = False):
         self.settings = settings
+        self.allow_remote = allow_remote
 
     def extract(self, path: Path) -> dict[str, Any]:
         if not _is_image(path):
             return {}
+        blocked = _remote_blocked(self.settings.base_url, self.allow_remote)
+        if blocked:
+            return {
+                "vision": {
+                    "error": blocked,
+                    "provider": "llama_http",
+                    "model": self.settings.model,
+                }
+            }
         try:
             content = chat_completion_with_image(
                 base_url=self.settings.base_url,

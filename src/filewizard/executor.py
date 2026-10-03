@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import errno
+import os
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -17,26 +19,67 @@ from .template import (
 )
 
 
-def append_unique(path: Path) -> Path:
-    """
-    If /foo/bar.txt exists, try:
-      /foo/bar_1.txt
-      /foo/bar_2.txt
-      ...
-    """
-
+def suggest_unique(path: Path) -> Path:
+    """Next free name for a dry-run preview. Does not create a file."""
     if not path.exists():
         return path
-
     stem = path.stem
     suffix = path.suffix
-
     for i in range(1, 10_000):
         candidate = path.with_name(f"{stem}_{i}{suffix}")
         if not candidate.exists():
             return candidate
+    raise FileExistsError(f"Could not find a unique destination for {path}")
+
+
+def append_unique(path: Path) -> Path:
+    """Reserve a destination name with an exclusive create.
+
+    The returned path exists as an empty file owned by this call. A later
+    move replaces that placeholder. Two processes cannot receive the same name.
+    """
+
+    def _reserve(candidate: Path) -> bool:
+        try:
+            fd = os.open(
+                candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644
+            )
+        except FileExistsError:
+            return False
+        os.close(fd)
+        return True
+
+    if _reserve(path):
+        return path
+
+    stem = path.stem
+    suffix = path.suffix
+    for i in range(1, 10_000):
+        candidate = path.with_name(f"{stem}_{i}{suffix}")
+        if _reserve(candidate):
+            return candidate
 
     raise FileExistsError(f"Could not find a unique destination for {path}")
+
+
+def _displace(journal: Journal, op_id: int, destination: Path) -> Path:
+    """Move an occupied destination aside so replace can be undone."""
+    journal_path = Path(journal.path)
+    parent = (
+        Path.cwd()
+        if journal_path.name == ":memory:"
+        else journal_path.expanduser().parent
+    )
+    backup = parent / "displaced" / f"{op_id}{destination.suffix}"
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.rename(destination, backup)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        shutil.copy2(destination, backup)
+        destination.unlink()
+    return backup
 
 
 @dataclass
@@ -57,6 +100,13 @@ class PlannedOperation:
 
     # Compact cascade/ocr/vision evidence (journal snapshot, 0.4.4+)
     perception: dict[str, Any] | None = None
+
+    # Source identity captured at plan time. None on legacy plans.
+    identity_size: int | None = None
+    identity_mtime_ns: int | None = None
+    identity_dev: int | None = None
+    identity_ino: int | None = None
+    identity_sha256: str | None = None
 
 
 class Executor:
@@ -200,10 +250,13 @@ class Executor:
                     )
 
                 if action.on_collision == "append":
-                    destination = append_unique(destination)
+                    destination = suggest_unique(destination)
 
                 # replace: keep destination; replace on execute.
 
+            from .identity import capture_identity
+
+            identity = capture_identity(facts.path)
             return PlannedOperation(
                 source=facts.path,
                 rule_id=rule.id,
@@ -214,6 +267,11 @@ class Executor:
                 create_target_dir=action.create_target_dir,
                 on_collision=action.on_collision,
                 status="planned",
+                identity_size=identity.size if identity else None,
+                identity_mtime_ns=identity.mtime_ns if identity else None,
+                identity_dev=identity.device if identity else None,
+                identity_ino=identity.inode if identity else None,
+                identity_sha256=identity.sha256 if identity else None,
             )
 
         except TemplateError as exc:
@@ -301,6 +359,26 @@ class Executor:
                     on_progress(finished, total)
                 continue
 
+            if op.identity_mtime_ns is not None:
+                from .identity import FileIdentity, identity_matches
+
+                planned_identity = FileIdentity(
+                    size=int(op.identity_size or 0),
+                    mtime_ns=int(op.identity_mtime_ns),
+                    device=int(op.identity_dev or 0),
+                    inode=int(op.identity_ino or 0),
+                    sha256=op.identity_sha256,
+                )
+                if not identity_matches(op.source, planned_identity):
+                    op.status = "stale"
+                    op.error = (
+                        "Source changed after the plan was built; not moved"
+                    )
+                    finished += 1
+                    if on_progress is not None:
+                        on_progress(finished, total)
+                    continue
+
             byte_size: int | None
             try:
                 byte_size = op.source.stat().st_size
@@ -314,10 +392,18 @@ class Executor:
                 op="move",
                 source=op.source,
                 destination=op.destination,
-                byte_size=byte_size,
+                byte_size=op.identity_size
+                if op.identity_size is not None
+                else byte_size,
                 perception=op.perception,
+                content_sha256=op.identity_sha256,
+                source_mtime_ns=op.identity_mtime_ns,
+                source_dev=op.identity_dev,
+                source_ino=op.identity_ino,
             )
 
+            reserved_placeholder = False
+            backup_path: Path | None = None
             try:
                 if op.create_target_dir:
                     op.destination.parent.mkdir(parents=True, exist_ok=True)
@@ -335,32 +421,34 @@ class Executor:
                     )
 
                 final_destination = op.destination
-
-                if (
+                occupied = (
                     final_destination.exists()
                     and final_destination.resolve() != op.source.resolve()
-                ):
-                    if op.on_collision == "skip":
-                        self.journal.finish_operation(
-                            op_id=op_id,
-                            status="skipped",
-                            destination=final_destination,
+                )
+
+                if occupied and op.on_collision == "skip":
+                    self.journal.finish_operation(
+                        op_id=op_id,
+                        status="skipped",
+                        destination=final_destination,
+                    )
+                    op.status = "skipped"
+                    finished += 1
+                    if on_progress is not None:
+                        on_progress(finished, total)
+                    continue
+
+                if occupied and op.on_collision == "replace":
+                    if final_destination.is_dir():
+                        raise IsADirectoryError(
+                            "Cannot replace an existing directory"
                         )
-                        op.status = "skipped"
-                        finished += 1
-                        if on_progress is not None:
-                            on_progress(finished, total)
-                        continue
+                    backup_path = _displace(self.journal, op_id, final_destination)
+                    self.journal.set_displaced(op_id, backup_path)
 
-                    if op.on_collision == "append":
-                        final_destination = append_unique(final_destination)
-
-                    elif op.on_collision == "replace":
-                        if final_destination.is_dir():
-                            raise IsADirectoryError(
-                                "Cannot replace an existing directory"
-                            )
-                        final_destination.unlink()
+                if op.on_collision == "append" or backup_path is not None:
+                    final_destination = append_unique(final_destination)
+                    reserved_placeholder = True
 
                 shutil.move(str(op.source), str(final_destination))
 
@@ -375,6 +463,26 @@ class Executor:
                 op.status = "done"
 
             except Exception as exc:
+                if reserved_placeholder and op.source.exists():
+                    try:
+                        if (
+                            final_destination.is_file()
+                            and not final_destination.is_symlink()
+                            and final_destination.stat().st_size == 0
+                        ):
+                            final_destination.unlink()
+                    except OSError:
+                        pass
+                if (
+                    backup_path is not None
+                    and backup_path.is_file()
+                    and not op.destination.exists()
+                ):
+                    try:
+                        shutil.move(str(backup_path), str(op.destination))
+                        self.journal.clear_displaced(op_id)
+                    except OSError:
+                        pass
                 self.journal.finish_operation(
                     op_id=op_id,
                     status="failed",
@@ -534,6 +642,40 @@ def undo_operations(
                 )
                 continue
 
+        digest = live["content_sha256"] if "content_sha256" in live.keys() else None
+        if digest:
+            from .perception.cache import file_content_hash
+
+            try:
+                actual_hash = file_content_hash(current)
+            except OSError as exc:
+                results.append(
+                    {
+                        "operation_id": original_op_id,
+                        "rule_id": rule_id,
+                        "status": "state_mismatch",
+                        "source": current,
+                        "destination": original,
+                        "error": f"Cannot hash journal destination: {exc}",
+                    }
+                )
+                continue
+            if actual_hash != digest:
+                results.append(
+                    {
+                        "operation_id": original_op_id,
+                        "rule_id": rule_id,
+                        "status": "state_mismatch",
+                        "source": current,
+                        "destination": original,
+                        "error": (
+                            "Content hash mismatch at destination; "
+                            "file may have been modified; refusing undo"
+                        ),
+                    }
+                )
+                continue
+
         # File already restored to original path (manual undo).
         if _paths_same_file(current, original):
             journal.mark_undone(original_op_id)
@@ -598,6 +740,15 @@ def undo_operations(
             )
 
             journal.mark_undone(original_op_id)
+
+            displaced = (
+                live["displaced_path"] if "displaced_path" in live.keys() else None
+            )
+            if displaced:
+                backup = Path(str(displaced))
+                if backup.is_file() and not current.exists():
+                    shutil.move(str(backup), str(current))
+                    journal.clear_displaced(original_op_id)
 
             results.append(
                 {

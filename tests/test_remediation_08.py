@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from filewizard.models import Action, Condition, Rule, RuleSet
 from filewizard.perception.cascade import _category_from_invoice_hint
 from filewizard.perception.snapshot import format_perception_evidence
@@ -47,7 +49,9 @@ def test_only_paths_matches_unresolved(tmp_path: Path) -> None:
     assert len(ops) == 1
 
 
-def test_mcp_plan_matches_screenshot_heuristic_without_http(tmp_path: Path) -> None:
+def test_mcp_plan_matches_screenshot_heuristic_without_http(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     src = tmp_path / "src"
     src.mkdir()
     (src / "Screenshot_2026-01-01.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
@@ -61,6 +65,9 @@ def test_mcp_plan_matches_screenshot_heuristic_without_http(tmp_path: Path) -> N
     )
     state = tmp_path / "state"
     state.mkdir()
+    monkeypatch.setattr(
+        "filewizard.mcp.tools.presets_default_state_dir", lambda: state
+    )
     (state / "perception.yaml").write_text(
         "heuristics: true\n"
         "cascade:\n  enabled: true\n  enable_stage2: false\n  enable_stage3: false\n"

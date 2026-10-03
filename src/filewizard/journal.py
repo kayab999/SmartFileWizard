@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -55,6 +57,12 @@ class Journal:
                 error TEXT,
                 byte_size INTEGER,
                 perception TEXT,
+                content_sha256 TEXT,
+                source_mtime_ns INTEGER,
+                source_dev INTEGER,
+                source_ino INTEGER,
+                displaced_path TEXT,
+                owner_pid INTEGER,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -103,6 +111,18 @@ class Journal:
             self.conn.execute(
                 "ALTER TABLE operations ADD COLUMN perception TEXT"
             )
+        for name, ddl in (
+            ("content_sha256", "TEXT"),
+            ("source_mtime_ns", "INTEGER"),
+            ("source_dev", "INTEGER"),
+            ("source_ino", "INTEGER"),
+            ("displaced_path", "TEXT"),
+            ("owner_pid", "INTEGER"),
+        ):
+            if name not in columns:
+                self.conn.execute(
+                    f"ALTER TABLE operations ADD COLUMN {name} {ddl}"
+                )
         self.conn.commit()
 
     @staticmethod
@@ -119,6 +139,11 @@ class Journal:
         byte_size: int | None = None,
         rule_name: str | None = None,
         perception: dict[str, Any] | str | None = None,
+        content_sha256: str | None = None,
+        source_mtime_ns: int | None = None,
+        source_dev: int | None = None,
+        source_ino: int | None = None,
+        owner_pid: int | None = None,
     ) -> int:
         now = self._now()
         perception_json: str | None
@@ -144,10 +169,15 @@ class Journal:
                 error,
                 byte_size,
                 perception,
+                content_sha256,
+                source_mtime_ns,
+                source_dev,
+                source_ino,
+                owner_pid,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 batch_id,
@@ -160,6 +190,11 @@ class Journal:
                 None,
                 byte_size,
                 perception_json,
+                content_sha256,
+                source_mtime_ns,
+                source_dev,
+                source_ino,
+                owner_pid if owner_pid is not None else os.getpid(),
                 now,
                 now,
             ),
@@ -223,6 +258,29 @@ class Journal:
             ),
         )
 
+        self.conn.commit()
+
+    def set_displaced(self, op_id: int, path: Path | str) -> None:
+        """Record the backup path of a file displaced by replace."""
+        self.conn.execute(
+            """
+            UPDATE operations
+            SET displaced_path = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (str(path), self._now(), op_id),
+        )
+        self.conn.commit()
+
+    def clear_displaced(self, op_id: int) -> None:
+        self.conn.execute(
+            """
+            UPDATE operations
+            SET displaced_path = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (self._now(), op_id),
+        )
         self.conn.commit()
 
     def mark_undone(self, op_id: int) -> None:
@@ -319,11 +377,11 @@ class Journal:
         return cur.fetchall()
 
     def reconcile_pending(self) -> tuple[int, int]:
-        """Promote pending rows whose move already landed.
+        """Promote pending rows whose moved bytes match the recorded hash.
 
-        A pending row becomes ``done`` when the destination is a regular
-        file of the recorded ``byte_size`` and the source path is gone.
-        Anything else stays pending. Returns ``(promoted, still_pending)``.
+        Size alone is not enough. A pending replace whose backup is still
+        aside and whose source is still present is put back first.
+        Returns ``(promoted, still_pending)``.
         """
         promoted = 0
         for row in self.pending_operations():
@@ -332,16 +390,30 @@ class Journal:
             source_raw = row["source"]
             dest_raw = row["destination"]
             recorded = row["byte_size"] if "byte_size" in row.keys() else None
+            digest = row["content_sha256"] if "content_sha256" in row.keys() else None
             if not source_raw or not dest_raw or recorded is None:
                 continue
             source = Path(str(source_raw))
             destination = Path(str(dest_raw))
+            displaced_raw = (
+                row["displaced_path"] if "displaced_path" in row.keys() else None
+            )
+            if displaced_raw and source.exists() and not destination.exists():
+                backup = Path(str(displaced_raw))
+                if backup.is_file():
+                    try:
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(backup), str(destination))
+                        self.clear_displaced(int(row["id"]))
+                    except OSError:
+                        pass
+                continue
             try:
+                from .identity import content_matches
+
                 source_gone = not source.exists()
-                destination_ok = (
-                    destination.is_file()
-                    and not destination.is_symlink()
-                    and destination.stat().st_size == int(recorded)
+                destination_ok = content_matches(
+                    destination, size=int(recorded), sha256=digest
                 )
             except OSError:
                 continue
@@ -356,14 +428,29 @@ class Journal:
         return promoted, len(self.pending_operations())
 
     def resolve_pending(self, status: str = "interrupted") -> int:
-        """R4: mark interrupted pending rows so they are not stuck forever."""
+        """Mark pending rows whose owner process is gone.
+
+        A null ``owner_pid`` is treated as stale. A live pid is left pending
+        so another FileWizard process can finish its own batch.
+        """
+        from .identity import pid_alive
+
+        stale: list[int] = []
+        for row in self.pending_operations():
+            pid = row["owner_pid"] if "owner_pid" in row.keys() else None
+            if pid is None or not pid_alive(int(pid)):
+                stale.append(int(row["id"]))
+        if not stale:
+            return 0
+        now = self._now()
+        placeholders = ",".join("?" for _ in stale)
         cur = self.conn.execute(
-            """
+            f"""
             UPDATE operations
             SET status = ?, updated_at = ?
-            WHERE status = 'pending'
+            WHERE status = 'pending' AND id IN ({placeholders})
             """,
-            (status, self._now()),
+            (status, now, *stale),
         )
         self.conn.commit()
         return int(cur.rowcount)

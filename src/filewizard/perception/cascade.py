@@ -294,9 +294,10 @@ class CascadeExtractor:
 
             vision = VisionSettings.model_validate(vision)
 
+        allow_remote = bool(getattr(config, "allow_remote", False))
         self._ocr = None
         if ocr.provider == "llama_http":
-            self._ocr = LlamaHttpOcrExtractor(ocr)
+            self._ocr = LlamaHttpOcrExtractor(ocr, allow_remote=allow_remote)
         elif ocr.provider == "tesseract":
             from .extractors import TesseractOcrExtractor
 
@@ -304,7 +305,7 @@ class CascadeExtractor:
 
         self._vlm = None
         if vision.provider == "llama_http":
-            self._vlm = LlamaHttpVisionExtractor(vision)
+            self._vlm = LlamaHttpVisionExtractor(vision, allow_remote=allow_remote)
 
     def extract(self, path: Path) -> dict[str, Any]:
         if path.suffix.lower() not in IMAGE_EXTENSIONS and not str(

@@ -181,12 +181,18 @@ class ReviewQueue:
                 item.resolved_at = datetime.now(timezone.utc).isoformat()
                 # I5: human confirmation is certain evidence — min_confidence
                 # rules must not reject it for a stale low score.
+                previous_confidence = item.confidence
                 item.confidence = 1.0
-                self.save()
                 try:
                     self.persist_resolved_labels()
                 except OSError as exc:
+                    item.resolved = False
+                    item.resolved_category = None
+                    item.resolved_at = None
+                    item.confidence = previous_confidence
                     logger.warning("review_labels.json not written: %s", exc)
+                    return False
+                self.save()
                 return True
         return False
 

@@ -207,12 +207,16 @@ def test_cli_presets_import_refreshes_stale_builtin(tmp_path: Path) -> None:
     assert "social-whatsapp-filename" in stale.read_text(encoding="utf-8")
 
 
-def test_mcp_plan_preset_wa_goes_social(tmp_path: Path) -> None:
+def test_mcp_plan_preset_wa_goes_social(tmp_path: Path, monkeypatch) -> None:
     """MCP plan --preset images-cascade (auto-seed) aplica la regla WA."""
     from filewizard.mcp.tools import filewizard_plan
 
     src = _wa_source(tmp_path)
-    payload = filewizard_plan(src, tmp_path / "state", preset="images-cascade")
+    state = tmp_path / "state"
+    monkeypatch.setattr(
+        "filewizard.mcp.tools.presets_default_state_dir", lambda: state
+    )
+    payload = filewizard_plan(src, state, preset="images-cascade")
     assert payload["ok"] is True, payload.get("error")
     assert len(payload["operations"]) == 1
     assert payload["operations"][0]["rule_id"] == "social-whatsapp-filename"

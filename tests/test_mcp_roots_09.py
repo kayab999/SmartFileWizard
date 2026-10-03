@@ -16,6 +16,10 @@ def jail_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "filewizard.mcp.tools.mcp_jail_config_dir",
         lambda: tmp_path,
     )
+    monkeypatch.setattr(
+        "filewizard.mcp.tools.presets_default_state_dir",
+        lambda: tmp_path,
+    )
     return tmp_path
 
 

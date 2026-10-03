@@ -265,6 +265,7 @@ def run(
             dry_run=not execute,
         )
 
+        scan_errors: list[str] = []
         operations, scanned = plan_operations(
             source=source,
             rules=ruleset,
@@ -273,9 +274,15 @@ def run(
             limit=limit,
             on_fact_error=_on_fact_error,
             allow_model_only=allow_model_only,
+            scan_errors=scan_errors,
         )
 
         click.echo(f"Scanned files: {scanned}")
+        if scan_errors:
+            click.echo(
+                f"Scan incomplete: {len(scan_errors)} path error(s).",
+                err=True,
+            )
         click.echo(f"Planned operations: {len(operations)}")
         click.echo("")
 

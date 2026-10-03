@@ -1,10 +1,10 @@
 # Brand sources
 
-JPEG masters (misnamed `.png`) used to generate runtime assets:
+Masters used to regenerate the runtime assets:
 
-- `icon.png` — app / window icon (folder + purple→cyan swirl)
-- `splash screen.png` — startup splash
-- `TRAY ICON SET.png` — idle / active / alert tray glyphs
+- `icon.png` — app / window icon (folder + violet→cyan path)
+- `splash screen.png` — startup splash (hat mark + wordmark)
+- `tray_idle.png`, `tray_active.png`, `tray_alert.png` — tray glyphs (hat mark)
 
 Regenerate packaged files:
 

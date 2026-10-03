@@ -26,7 +26,7 @@ def test_list_presets_lists_yaml_with_abs_path(state_dir) -> None:
     (presets_dir / "images.yaml").write_text(
         "name: images\nrules:\n"
         "  - id: match-jpg\n    name: Match JPG\n"
-        "    when: {extension: jpg}\n    then: {move_to: './fotos'}\n",
+        "    when: {extensions: [jpg]}\n    then: {move_to: './fotos'}\n",
         encoding="utf-8",
     )
 

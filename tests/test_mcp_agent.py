@@ -81,12 +81,15 @@ def test_apply_labels_optional_plan(tmp_path) -> None:
     assert (src / "a.jpg").is_file()
 
 
-def test_apply_labels_plan_uses_preset_rules(tmp_path) -> None:
+def test_apply_labels_plan_uses_preset_rules(tmp_path, monkeypatch) -> None:
     src = tmp_path / "src"
     out = tmp_path / "out"
     src.mkdir()
     (src / "b.jpg").write_bytes(b"x")
     state = tmp_path / "state"
+    monkeypatch.setattr(
+        "filewizard.mcp.tools.presets_default_state_dir", lambda: state
+    )
     presets = state / "presets"
     presets.mkdir(parents=True)
     write_rules(presets / "invoices.yaml", out)
