@@ -86,6 +86,16 @@ class TrayIconManager:
         self.window.raise_()
         self.window.activateWindow()
 
+    def notify_still_running(self) -> None:
+        if self.tray is None:
+            return
+        self.tray.showMessage(
+            "FileWizard",
+            "Sigue activo en la bandeja. Usa Salir para cerrarlo.",
+            QSystemTrayIcon.MessageIcon.Information,
+            4000,
+        )
+
     def quit_app(self) -> None:
         setattr(self.window, "_force_quit", True)
         QApplication.instance().quit()

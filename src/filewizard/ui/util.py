@@ -51,41 +51,49 @@ def elide_middle(text: str, max_len: int = 64) -> str:
 
 
 def abandon_busy_close(widget, worker, event, *, busy_text: str) -> None:
-    """closeEvent helper: wait, or detach worker and close the window.
+    """closeEvent helper: cancel the worker and wait until it finishes.
 
-    Does not kill in-flight HTTP (up to provider timeout). The user gets
-    the window back without ``kill`` from a terminal.
+    The worker object stays referenced until ``finished``. Closing does not
+    drop the QThread while C++ is still running it.
     """
+    from PySide6.QtCore import QEventLoop, QTimer
     from PySide6.QtWidgets import QMessageBox
 
-    box = QMessageBox(widget)
-    box.setWindowTitle("FileWizard")
-    box.setText(busy_text)
-    box.setInformativeText(
-        "«Salir de todos modos» cancela cuando sea posible y cierra esta "
-        "ventana. Una llamada OCR/VLM puede seguir hasta su timeout."
-    )
-    wait_btn = box.addButton("Esperar", QMessageBox.ButtonRole.RejectRole)
-    leave_btn = box.addButton(
-        "Salir de todos modos", QMessageBox.ButtonRole.AcceptRole
-    )
-    box.setDefaultButton(wait_btn)
-    box.exec()
-    if box.clickedButton() is not leave_btn:
-        event.ignore()
+    if worker is None:
         return
-    if worker is not None and hasattr(worker, "request_cancel"):
-        worker.request_cancel()
-    if worker is not None:
-        try:
-            worker.done.disconnect()
-        except Exception:
-            pass
-        try:
-            worker.setParent(None)
-        except RuntimeError:
-            pass
-    event.accept()
+    try:
+        running = worker.isRunning()
+    except RuntimeError:
+        return
+    if not running:
+        return
+    event.ignore()
+    if getattr(widget, "_fw_waiting_worker", False):
+        return
+    widget._fw_waiting_worker = True
+    widget.setEnabled(False)
+    try:
+        if hasattr(worker, "request_cancel"):
+            worker.request_cancel()
+        box = QMessageBox(widget)
+        box.setWindowTitle("FileWizard")
+        box.setText(busy_text)
+        box.setInformativeText(
+            "Se cancela al terminar el archivo actual. "
+            "La ventana se cierra cuando el trabajo se detiene."
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        box.show()
+        loop = QEventLoop(widget)
+        worker.finished.connect(loop.quit)
+        if worker.isRunning():
+            loop.exec()
+        box.hide()
+        box.deleteLater()
+    finally:
+        widget._fw_waiting_worker = False
+        widget.setEnabled(True)
+    QTimer.singleShot(0, widget.close)
 
 
 STATUS_GLYPHS = {

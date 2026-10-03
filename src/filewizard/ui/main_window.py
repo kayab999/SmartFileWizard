@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         self.undo_worker = None
         self.tray_manager = None
         self._force_quit = False
+        self._tray_hint_shown = False
 
         self.setWindowTitle("FileWizard")
         self.resize(960, 740)
@@ -96,10 +97,15 @@ class MainWindow(QMainWindow):
         support_btn.setAccessibleName("Apoyar FileWizard")
         support_btn.setToolTip("Buy Me a Coffee y el repositorio en GitHub")
         support_btn.clicked.connect(self.open_support)
+        quit_btn = QPushButton("Salir")
+        quit_btn.setAccessibleName("Salir de FileWizard")
+        quit_btn.setToolTip("Cierra FileWizard, también si sigue en la bandeja")
+        quit_btn.clicked.connect(self.quit_application)
         top_row.addWidget(self.review_btn)
         top_row.addWidget(watch_btn)
         top_row.addWidget(settings_btn)
         top_row.addWidget(support_btn)
+        top_row.addWidget(quit_btn)
 
         layout.addLayout(top_row)
         layout.addWidget(subtitle)
@@ -175,6 +181,15 @@ class MainWindow(QMainWindow):
         self.refresh_presets()
         self.refresh_journal()
         self.refresh_review_badge()
+
+    def quit_application(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        self._force_quit = True
+        self.close()
+        app = QApplication.instance()
+        if app is not None and not getattr(self, "_fw_waiting_worker", False):
+            app.quit()
 
     def open_support(self) -> None:
         from .support import open_support_links
@@ -286,13 +301,26 @@ class MainWindow(QMainWindow):
         """R4: recovery for interrupted executions."""
         journal = Journal(self.state_dir / "journal.db")
         try:
-            pending = journal.pending_operations()
-            if pending:
+            promoted, remaining = journal.reconcile_pending()
+            if promoted and not remaining:
+                QMessageBox.information(
+                    self,
+                    "FileWizard",
+                    f"Se recuperaron {promoted} operaciones interrumpidas: "
+                    "el archivo ya estaba en el destino con el tamaño registrado.",
+                )
+            if remaining:
+                note = (
+                    f"Se recuperaron {promoted} como hechas.\n"
+                    if promoted
+                    else ""
+                )
                 reply = QMessageBox.question(
                     self,
                     "FileWizard",
-                    f"Hay {len(pending)} operaciones 'pending' de una ejecución "
-                    "interrumpida.\n¿Marcarlas como interrumpidas?",
+                    note
+                    + f"Hay {remaining} operaciones pendientes que no coinciden "
+                    "con el disco.\n¿Marcarlas como interrumpidas?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.Yes,
                 )
@@ -498,5 +526,8 @@ class MainWindow(QMainWindow):
         ):
             event.ignore()
             self.hide()
+            if not self._tray_hint_shown and self.tray_manager is not None:
+                self._tray_hint_shown = True
+                self.tray_manager.notify_still_running()
             return
         super().closeEvent(event)

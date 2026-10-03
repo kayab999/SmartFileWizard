@@ -549,6 +549,14 @@ class ReviewPage(QWidget):
             "Abrir carpeta destino al terminar"
         )
         self.open_folder_after.setChecked(False)
+        self.allow_model_only = QCheckBox(
+            "Aplicar aunque solo decida el modelo"
+        )
+        self.allow_model_only.setChecked(False)
+        self.allow_model_only.setToolTip(
+            "Sin esta casilla, una coincidencia que depende solo de OCR, "
+            "visión o cascada queda en la cola de revisión."
+        )
 
         save_row = QHBoxLayout()
         self.save_preset_name = QLineEdit()
@@ -566,6 +574,7 @@ class ReviewPage(QWidget):
         layout.addWidget(hint)
         layout.addWidget(self.tree, 1)
         layout.addLayout(save_row)
+        layout.addWidget(self.allow_model_only)
         layout.addWidget(self.open_folder_after)
 
     @staticmethod
@@ -784,6 +793,9 @@ class WizardDialog(QDialog):
         self.page_conditions = ConditionsPage(intent)
         self.page_action = ActionPage(intent)
         self.page_review = ReviewPage()
+        self.page_review.allow_model_only.toggled.connect(
+            lambda _checked: self.update_ui()
+        )
         self.is_cascade = bool(intent.rules_file or intent.preset_name)
 
         self.stack.addWidget(self.page_source)
@@ -934,8 +946,12 @@ class WizardDialog(QDialog):
             self.btn_next.setText("Revisar")
             self.btn_next.setEnabled(self.worker is None)
         elif index == 3:
+            allow_model = self.page_review.allow_model_only.isChecked()
             planned = sum(
-                1 for op in self.operations if op.status == "planned"
+                1
+                for op in self.operations
+                if op.status == "planned"
+                or (allow_model and op.status == "needs-review")
             )
             self.btn_next.setText(f"Aplicar {planned}" if planned else "Aplicar")
             self.btn_next.setEnabled(self.worker is None and planned > 0)
@@ -969,6 +985,9 @@ class WizardDialog(QDialog):
         options.update(self.page_source.options())
 
         options["state_dir"] = str(self.state_dir)
+        options["allow_model_only"] = (
+            self.page_review.allow_model_only.isChecked()
+        )
 
         if self.is_cascade:
             if self.intent.preset_name:
@@ -1125,6 +1144,11 @@ class WizardDialog(QDialog):
         self.update_ui()
 
     def apply_pressed(self) -> None:
+        if self.page_review.allow_model_only.isChecked():
+            for op in self.operations:
+                if op.status == "needs-review":
+                    op.status = "planned"
+                    op.error = None
         planned = [
             op for op in self.operations if op.status == "planned"
         ]

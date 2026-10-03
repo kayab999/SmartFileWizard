@@ -17,20 +17,17 @@ def test_http_lock_serializes_calls(tmp_path: Path) -> None:
     order: list[str] = []
     real_lock = http_openai._HTTP_LOCK
 
-    def fake_urlopen(req, timeout=None):
+    def fake_post(*args, **kwargs):
         order.append("enter")
         time.sleep(0.05)
         order.append("exit")
 
         class Resp:
-            def __enter__(self):
-                return self
+            def raise_for_status(self):
+                return None
 
-            def __exit__(self, *a):
-                return False
-
-            def read(self):
-                return b'{"choices": [{"message": {"content": "ok"}}]}'
+            def json(self):
+                return {"choices": [{"message": {"content": "ok"}}]}
 
         return Resp()
 
@@ -40,7 +37,7 @@ def test_http_lock_serializes_calls(tmp_path: Path) -> None:
         patch.object(
             http_openai, "_resize_image_bytes", return_value=(b"img", "image/png")
         ),
-        patch.object(http_openai.urllib.request, "urlopen", side_effect=fake_urlopen),
+        patch.object(http_openai.httpx.Client, "post", side_effect=fake_post),
     ):
         threads = [
             threading.Thread(
@@ -78,7 +75,12 @@ def test_gui_logging_setup(tmp_path: Path) -> None:
     from logging.handlers import RotatingFileHandler
 
     assert (
-        sum(isinstance(h, RotatingFileHandler) for h in logger.handlers) == 1
+        sum(
+            isinstance(h, RotatingFileHandler)
+            and getattr(h, "_fw_path", None) == str(log_path)
+            for h in logger.handlers
+        )
+        == 1
     )
 
 
@@ -174,6 +176,9 @@ def test_close_guards_present() -> None:
     wizard = (ui / "wizard.py").read_text(encoding="utf-8")
     assert "def closeEvent" in watch
     assert "def closeEvent" in preview
+    util = (ui / "util.py").read_text(encoding="utf-8")
     assert "abandon_busy_close" in watch
     assert "abandon_busy_close" in wizard
-    assert "Salir de todos modos" in (ui / "util.py").read_text(encoding="utf-8")
+    assert "request_cancel" in util
+    assert "worker.finished" in util
+    assert "setParent(None)" not in util

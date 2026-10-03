@@ -22,6 +22,12 @@ from .options import build_rule
 logger = logging.getLogger(__name__)
 
 
+def _cancel_perception() -> None:
+    from ..perception.http_openai import cancel_inflight_http
+
+    cancel_inflight_http()
+
+
 def ruleset_from_options(options: dict[str, Any]) -> RuleSet:
     """
     Build a RuleSet for preview/execute.
@@ -66,6 +72,7 @@ class PreviewWorker(QThread):
 
     def request_cancel(self) -> None:
         self.cancel_token.cancel()
+        _cancel_perception()
 
     def run(self) -> None:
         try:
@@ -99,7 +106,7 @@ class PreviewWorker(QThread):
                         facts.path, facts.features, save=False
                     )
                 except Exception as exc:
-                    logger.debug("review enqueue skipped: %s", exc)
+                    logger.warning("review enqueue skipped: %s", exc)
 
             with Journal(self.state_dir / "journal.db") as journal:
                 executor = Executor(
@@ -116,12 +123,19 @@ class PreviewWorker(QThread):
                     on_progress=_progress,
                     on_facts=_on_facts,
                     cancel=self.cancel_token,
+                    allow_model_only=bool(self.options.get("allow_model_only")),
                 )
+
+            for op in operations:
+                if op.status == "needs-review":
+                    review_queue.add_model_hold(
+                        op.source, op.error or "", save=False
+                    )
 
             try:
                 review_queue.save()
             except Exception as exc:
-                logger.debug("review queue save skipped: %s", exc)
+                logger.warning("review queue save failed: %s", exc)
 
             self.done.emit(operations, scanned, "")
 
@@ -129,7 +143,7 @@ class PreviewWorker(QThread):
             try:
                 review_queue.save()
             except Exception as exc:
-                logger.debug("review queue save skipped: %s", exc)
+                logger.warning("review queue save failed: %s", exc)
             self.done.emit([], 0, "cancelado")
         except RulesLoadError as exc:
             self.done.emit([], 0, str(exc))
@@ -156,6 +170,7 @@ class ExecuteWorker(QThread):
 
     def request_cancel(self) -> None:
         self.cancel_token.cancel()
+        _cancel_perception()
 
     def run(self) -> None:
         try:
@@ -189,12 +204,19 @@ class WatchTickWorker(QThread):
     def __init__(self, watch_config, parent=None):
         super().__init__(parent)
         self.watch_config = watch_config
+        self.cancel_token = CancelToken()
+
+    def request_cancel(self) -> None:
+        self.cancel_token.cancel()
+        _cancel_perception()
 
     def run(self) -> None:
         from ..watch import WatchError, watch_once
 
         try:
-            ops, scanned = watch_once(self.watch_config)
+            ops, scanned = watch_once(
+                self.watch_config, cancel=self.cancel_token
+            )
             self.done.emit(ops, scanned, "")
         except WatchError as exc:
             self.done.emit([], 0, str(exc))
@@ -211,11 +233,23 @@ class UndoWorker(QThread):
         super().__init__(parent)
         self.rows = rows
         self.state_dir = state_dir
+        self.cancel_token = CancelToken()
+
+    def request_cancel(self) -> None:
+        self.cancel_token.cancel()
+        _cancel_perception()
 
     def run(self) -> None:
         try:
             with Journal(self.state_dir / "journal.db") as journal:
-                results = undo_operations(journal, self.rows, dry_run=False)
+                results = undo_operations(
+                    journal,
+                    self.rows,
+                    dry_run=False,
+                    cancel=self.cancel_token,
+                )
             self.done.emit(results, "")
+        except CancelledError:
+            self.done.emit([], "cancelado")
         except Exception as exc:
             self.done.emit([], str(exc))

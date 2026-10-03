@@ -29,6 +29,7 @@ from .perception.config import (
 )
 from .perception.factory import build_extractors, perception_status
 from . import __version__
+from .verify_batch import format_batch_list, format_report, list_batches, verify_batch
 from .watch import WatchConfig, WatchError, WatcherLockError, watch_once
 
 
@@ -60,14 +61,20 @@ def warn_remote_perception(profile: str | None, state_dir: Path) -> None:
 
 
 def warn_pending_journal(journal: Journal) -> None:
-    """H14 (0.9.5): surface interrupted batches; GUI already warns (R4)."""
+    """Surface interrupted batches after reconciling rows that already landed."""
     try:
-        pending = journal.pending_operations()
+        promoted, pending = journal.reconcile_pending()
     except Exception:
         return
+    if promoted:
+        click.echo(
+            f"warning: reconciled {promoted} pending operation(s) as done "
+            "(destination exists at the recorded size and the source is gone).",
+            err=True,
+        )
     if pending:
         click.echo(
-            f"warning: journal has {len(pending)} 'pending' operation(s) "
+            f"warning: journal has {pending} 'pending' operation(s) "
             f"from an interrupted run; review history before executing.",
             err=True,
         )
@@ -174,6 +181,12 @@ def cli() -> None:
     help="Do not ask for confirmation.",
 )
 @click.option(
+    "--allow-model-only",
+    is_flag=True,
+    default=False,
+    help="Apply matches that depend only on OCR, vision, or cascade evidence.",
+)
+@click.option(
     "--verbose",
     is_flag=True,
     default=False,
@@ -191,10 +204,14 @@ def run(
     limit: int | None,
     state_dir: Path,
     yes: bool,
+    allow_model_only: bool,
     verbose: bool,
 ) -> None:
     """Scan a directory and apply organization rules."""
 
+    from .logsetup import setup_file_logging
+
+    setup_file_logging(state_dir)
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(levelname)s %(name)s %(message)s",
@@ -255,6 +272,7 @@ def run(
             extractors=extractors,
             limit=limit,
             on_fact_error=_on_fact_error,
+            allow_model_only=allow_model_only,
         )
 
         click.echo(f"Scanned files: {scanned}")
@@ -263,6 +281,25 @@ def run(
 
         for op in operations:
             echo_operation(op, verbose=verbose)
+
+        held = [op for op in operations if op.status == "needs-review"]
+        if held:
+            from .review_queue import ReviewQueue
+
+            queue = ReviewQueue(state_dir=state_dir)
+            for op in held:
+                queue.add_model_hold(op.source, op.error or "", save=False)
+            try:
+                queue.save()
+            except OSError as exc:
+                logging.getLogger("filewizard").warning(
+                    "review queue save failed: %s", exc
+                )
+            click.echo(
+                f"{len(held)} file(s) held for review: model evidence does not "
+                "match a deterministic rule. Re-run with --allow-model-only "
+                "to apply them."
+            )
 
         if not execute:
             click.echo("")
@@ -326,7 +363,10 @@ def undo(
 ) -> None:
     """Undo moves recorded in the journal."""
 
+    from .logsetup import setup_file_logging
+
     state_dir = state_dir.expanduser().resolve()
+    setup_file_logging(state_dir)
 
     with Journal(state_dir / "journal.db") as journal:
         warn_pending_journal(journal)
@@ -367,6 +407,39 @@ def undo(
 
         for status, count in counts.items():
             click.echo(f"  {status}: {count}")
+
+
+@cli.command("verify")
+@click.option(
+    "--batch",
+    "batch_id",
+    default=None,
+    help="Journal batch to check. Omit to list recorded batches.",
+)
+@click.option(
+    "--state-dir",
+    type=click.Path(path_type=Path),
+    default=Path("~/.local/share/filewizard").expanduser(),
+    help="State and journal directory.",
+)
+@click.pass_context
+def verify_cmd(ctx: click.Context, batch_id: str | None, state_dir: Path) -> None:
+    """Compare a recorded batch with the files on disk. Reads only."""
+
+    state_dir = state_dir.expanduser().resolve()
+    journal_path = state_dir / "journal.db"
+    if not batch_id:
+        click.echo(format_batch_list(list_batches(journal_path)))
+        return
+
+    report = verify_batch(
+        journal_path,
+        batch_id,
+        review_queue_path=state_dir / "review_queue.json",
+    )
+    click.echo(format_report(report))
+    if not report.passed:
+        ctx.exit(1)
 
 
 @cli.command("purge")
@@ -447,6 +520,7 @@ def _run_watch_loop(
     limit: int | None,
     state_dir: Path,
     verbose: bool,
+    allow_model_only: bool = False,
 ) -> None:
     """Poll `source` every `interval` seconds; debounce by signature."""
     from .watch import watch_loop
@@ -460,6 +534,7 @@ def _run_watch_loop(
         limit=limit,
         profile=perception_profile,
         agent_features=agent_features,
+        allow_model_only=allow_model_only,
     )
 
     def _on_tick(
@@ -566,6 +641,12 @@ def watch_cmd() -> None:
     default=False,
     help="Show detailed match explanations.",
 )
+@click.option(
+    "--allow-model-only",
+    is_flag=True,
+    default=False,
+    help="Apply matches that depend only on OCR, vision, or cascade evidence.",
+)
 def watch_once_cmd(
     source: Path,
     rules: Path | None,
@@ -579,9 +660,13 @@ def watch_once_cmd(
     yes: bool,
     verbose: bool,
     interval_seconds: float | None,
+    allow_model_only: bool,
 ) -> None:
     """Run rules on a folder once (or poll with --interval)."""
 
+    from .logsetup import setup_file_logging
+
+    setup_file_logging(state_dir)
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(levelname)s %(name)s %(message)s",
@@ -599,6 +684,7 @@ def watch_once_cmd(
             limit=limit,
             state_dir=state_dir,
             verbose=verbose,
+            allow_model_only=allow_model_only,
         )
         return
 
@@ -612,6 +698,7 @@ def watch_once_cmd(
             limit=limit,
             profile=perception_profile,
             agent_features=agent_features,
+            allow_model_only=allow_model_only,
         )
 
     warn_remote_perception(

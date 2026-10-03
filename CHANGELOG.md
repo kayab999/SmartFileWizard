@@ -7,6 +7,17 @@ All notable product versions. Format: Keep a Changelog (keep it short).
 ### Added
 
 - GUI **Apoyar…** (home + tray): Buy Me a Coffee and GitHub.
+- `filewizard run` / `watch once` `--allow-model-only`, and the wizard checkbox **Aplicar aunque solo decida el modelo**.
+- Home **Salir**. The first close that leaves the process in the tray shows a message.
+
+### Changed
+
+- Closing a busy window cancels after the current file and waits for the worker. It no longer drops the thread.
+- Startup reconciles `pending` journal rows: destination present at the recorded size and source gone becomes `done`.
+- MCP execute and confirming undo refuse to write unless `mcp.yaml` `allowed_roots` or `FILEWIZARD_SOURCE_ROOT` is set.
+- A match that depends only on OCR, vision, or cascade stays `needs-review` unless a deterministic rule would make the same move, a human review label is present, or the batch override is on.
+- CLI `run`, `undo`, and `watch` write the same rotating `filewizard.log` as the GUI.
+- Primary buttons use `#5B21B6` → `#0369A1` so the label clears WCAG AA.
 
 ## [0.11.0] — 2026-09-15
 

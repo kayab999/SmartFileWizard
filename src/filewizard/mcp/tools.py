@@ -121,6 +121,18 @@ def _path_within(path: Path, roots: list[Path]) -> bool:
     return any(resolved == root or root in resolved.parents for root in roots)
 
 
+JAIL_UNCONFIGURED = (
+    "Jail no configurado: Operaciones de escritura deshabilitadas. "
+    "Define allowed_roots en mcp.yaml o FILEWIZARD_SOURCE_ROOT."
+)
+
+
+def _require_write_jail(tool: str, roots: list[Path]) -> dict | None:
+    if not roots:
+        return result_error(tool, JAIL_UNCONFIGURED)
+    return None
+
+
 def _check_source_root(tool: str, src: Path, roots: list[Path]) -> dict | None:
     if roots and not _path_within(src, roots):
         return result_error(tool, "source outside allowed_roots")
@@ -393,6 +405,7 @@ def filewizard_plan(
     enable_ocr: bool = False,
     enable_vision: bool = False,
     agent_features: Path | dict[str, dict] | None = None,
+    allow_model_only: bool = False,
 ) -> dict:
     """Dry-run only: build a plan; never moves files.
 
@@ -429,6 +442,7 @@ def filewizard_plan(
                 executor=executor,
                 extractors=extractors,
                 limit=lim,
+                allow_model_only=allow_model_only,
             )
         _apply_destination_jail(operations, roots)
     except Exception as exc:
@@ -459,6 +473,7 @@ def filewizard_execute(
     enable_ocr: bool = False,
     enable_vision: bool = False,
     agent_features: Path | dict[str, dict] | None = None,
+    allow_model_only: bool = False,
 ) -> dict:
     """Execute a plan. Requires confirm=True; otherwise a structured error.
 
@@ -471,13 +486,17 @@ def filewizard_execute(
         )
 
     try:
+        roots = mcp_allowed_roots(mcp_jail_config_dir())
+    except McpJailError as exc:
+        return result_error("filewizard_execute", str(exc))
+    blocked_jail = _require_write_jail("filewizard_execute", roots)
+    if blocked_jail is not None:
+        return blocked_jail
+
+    try:
         src = Path(source).expanduser().resolve()
         state = _state_root(state_dir).resolve()
         ensure_builtin_presets(state)  # same seeding as CLI run
-        try:
-            roots = mcp_allowed_roots(mcp_jail_config_dir())
-        except McpJailError as exc:
-            return result_error("filewizard_execute", str(exc))
         blocked = _check_source_root("filewizard_execute", src, roots)
         if blocked is not None:
             return blocked
@@ -500,6 +519,7 @@ def filewizard_execute(
                 executor=executor,
                 extractors=extractors,
                 limit=lim,
+                allow_model_only=allow_model_only,
             )
             # Jail destinations before any move; marked ops are skipped.
             _apply_destination_jail(operations, roots)
@@ -545,6 +565,14 @@ def filewizard_undo_batch(
 
     # Strict identity check — mirrors filewizard_execute (I1 / ADR-0004).
     apply = confirm is True
+    if apply:
+        try:
+            roots_for_write = mcp_allowed_roots(mcp_jail_config_dir())
+        except McpJailError as exc:
+            return result_error("filewizard_undo_batch", str(exc))
+        blocked_jail = _require_write_jail("filewizard_undo_batch", roots_for_write)
+        if blocked_jail is not None:
+            return blocked_jail
 
     try:
         state = _state_root(state_dir).resolve()

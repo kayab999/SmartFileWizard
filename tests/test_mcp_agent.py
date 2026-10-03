@@ -75,7 +75,7 @@ def test_apply_labels_optional_plan(tmp_path) -> None:
     assert payload["plan"] is not None
     assert payload["plan"]["scanned"] == 1
     assert len(payload["plan"]["operations"]) == 1
-    assert payload["plan"]["operations"][0]["status"] == "planned"
+    assert payload["plan"]["operations"][0]["status"] == "needs-review"
     assert str(payload["plan"]["operations"][0]["source"]).endswith("a.jpg")
     # No side effects: source file still present.
     assert (src / "a.jpg").is_file()

@@ -38,6 +38,8 @@ def test_qss_contains_palette() -> None:
         "#242428",
         "#8B5CF6",
         "#06B6D4",
+        "#0369A1",
+        "#5B21B6",
         "#F59E0B",
         "#10B981",
         "#F3F4F6",

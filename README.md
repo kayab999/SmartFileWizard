@@ -298,9 +298,11 @@ Safety: `filewizard_execute` and `filewizard_undo_batch` **require
 `confirm=true` exactly** (any other value is rejected); `filewizard_plan` and
 `filewizard_apply_agent_labels` are dry-run only and never touch the FS.  
 **0.8.0:** plan/execute load the same perception stack as CLI (`perception.yaml` / profile).  
-**0.9.0:** optional MCP jail via `FILEWIZARD_SOURCE_ROOT` or
-`<state_dir>/mcp.yaml` (`allowed_roots`; unset = same power as CLI;
-`confirm=true` does not bypass).  
+**Writes from MCP require a jail.** Set `FILEWIZARD_SOURCE_ROOT` or
+`allowed_roots` in `~/.local/share/filewizard/mcp.yaml`. Without that,
+`filewizard_execute` and a confirming undo return
+`Jail no configurado: Operaciones de escritura deshabilitadas`.
+`confirm=true` does not bypass a path outside the roots.  
 The same journal is used as CLI/GUI, so undo works across all surfaces.
 
 ---

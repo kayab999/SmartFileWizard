@@ -25,6 +25,12 @@ def state_dir(tmp_path) -> Path:
     return tmp_path / "state"
 
 
+@pytest.fixture(autouse=True)
+def _write_jail(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mutation tests opt into a jail that covers the temp tree."""
+    monkeypatch.setenv("FILEWIZARD_SOURCE_ROOT", str(tmp_path))
+
+
 def test_plan_never_moves(tmp_path, state_dir) -> None:
     src = tmp_path / "src"
     out = tmp_path / "out"

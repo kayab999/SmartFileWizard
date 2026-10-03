@@ -318,6 +318,43 @@ class Journal:
         )
         return cur.fetchall()
 
+    def reconcile_pending(self) -> tuple[int, int]:
+        """Promote pending rows whose move already landed.
+
+        A pending row becomes ``done`` when the destination is a regular
+        file of the recorded ``byte_size`` and the source path is gone.
+        Anything else stays pending. Returns ``(promoted, still_pending)``.
+        """
+        promoted = 0
+        for row in self.pending_operations():
+            if str(row["op"]) not in {"move", "undo"}:
+                continue
+            source_raw = row["source"]
+            dest_raw = row["destination"]
+            recorded = row["byte_size"] if "byte_size" in row.keys() else None
+            if not source_raw or not dest_raw or recorded is None:
+                continue
+            source = Path(str(source_raw))
+            destination = Path(str(dest_raw))
+            try:
+                source_gone = not source.exists()
+                destination_ok = (
+                    destination.is_file()
+                    and not destination.is_symlink()
+                    and destination.stat().st_size == int(recorded)
+                )
+            except OSError:
+                continue
+            if source_gone and destination_ok:
+                self.finish_operation(
+                    int(row["id"]),
+                    status="done",
+                    destination=destination,
+                    byte_size=int(recorded),
+                )
+                promoted += 1
+        return promoted, len(self.pending_operations())
+
     def resolve_pending(self, status: str = "interrupted") -> int:
         """R4: mark interrupted pending rows so they are not stuck forever."""
         cur = self.conn.execute(

@@ -1,48 +1,14 @@
 from __future__ import annotations
 
-import logging
 import sys
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
 def setup_gui_logging(state_dir: Path) -> Path:
-    """File logging for GUI runs (H9): rotating filewizard.log in state_dir.
+    """File logging for GUI runs. Same rotating log as the CLI."""
+    from ..logsetup import setup_file_logging
 
-    Never logs OCR bodies / base64 — callers only log paths, sizes, errors.
-    Idempotent: safe to call once at startup.
-    """
-    log_path = state_dir / "filewizard.log"
-    logger = logging.getLogger("filewizard")
-    logger.setLevel(logging.INFO)
-    for handler in logger.handlers:
-        if isinstance(handler, RotatingFileHandler) and getattr(
-            handler, "_fw_path", None
-        ) == str(log_path):
-            return log_path
-    file_handler = RotatingFileHandler(
-        log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
-    )
-    file_handler._fw_path = str(log_path)  # type: ignore[attr-defined]
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-    )
-    logger.addHandler(file_handler)
-    # Console too when launched from a terminal; .desktop runs have no TTY.
-    try:
-        if sys.stderr.isatty() and not any(
-            isinstance(h, logging.StreamHandler)
-            and not isinstance(h, RotatingFileHandler)
-            for h in logger.handlers
-        ):
-            console = logging.StreamHandler()
-            console.setFormatter(
-                logging.Formatter("%(levelname)s %(name)s %(message)s")
-            )
-            logger.addHandler(console)
-    except Exception:
-        pass
-    return log_path
+    return setup_file_logging(state_dir)
 
 
 def main() -> None:
@@ -64,6 +30,16 @@ def main() -> None:
     setup_gui_logging(state_dir)
 
     app = QApplication(sys.argv)
+    from .single_instance import accept_show_requests, claim_primary
+
+    primary = claim_primary()
+    if primary is None:
+        print(
+            "FileWizard ya está abierto. Se mostró la ventana existente.",
+            file=sys.stderr,
+        )
+        return
+    primary.setParent(app)
     app.setApplicationName("FileWizard")
     app.setOrganizationName("FileWizard")
     app.setWindowIcon(QIcon(str(asset_path("app_icon.png"))))
@@ -82,6 +58,7 @@ def main() -> None:
             app.processEvents()
 
     window = MainWindow(state_dir=state_dir)
+    accept_show_requests(primary, window)
     tray = TrayIconManager(window)
     window.tray_manager = tray if tray.attach() else None
 

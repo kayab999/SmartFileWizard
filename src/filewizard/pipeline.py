@@ -140,6 +140,7 @@ def plan_operations(
     on_progress: Callable[[int, int | None], None] | None = None,
     on_facts: Callable[..., None] | None = None,
     cancel: CancelToken | None = None,
+    allow_model_only: bool = False,
 ) -> tuple[list[PlannedOperation], int]:
     """
     Shared scan → facts → match → plan pipeline used by CLI and UI.
@@ -147,6 +148,7 @@ def plan_operations(
     on_progress(scanned, limit_or_none)
     on_facts(facts): optional hook after collect_facts (review queue, telemetry)
     cancel: cooperative stop between files (CancelledError if triggered)
+    allow_model_only: apply matches that depend only on model evidence
     """
     if isinstance(rules, RuleSet):
         rule_list = list(rules.rules)
@@ -205,6 +207,17 @@ def plan_operations(
             )
             if op is not None:
                 op.perception = snap
+                if op.status == "planned":
+                    from .model_gate import MODEL_HOLD_REASON, model_match_may_apply
+
+                    if not model_match_may_apply(
+                        rule_list,
+                        facts,
+                        match.rule,
+                        allow_model_only=allow_model_only,
+                    ):
+                        op.status = "needs-review"
+                        op.error = MODEL_HOLD_REASON
                 operations.append(op)
 
             if match.rule.stop_after_match:

@@ -64,7 +64,7 @@ FileWizard is a **local-first, rule-based file classification and organization e
 | Watch single tick | **Done 0.6.0** | `filewizard watch once` (`watch.py` `watch_once`); preset/rules; dry-run |
 | Watch polling loop | **Done 0.6.0** | `watch once --interval N`; debounce mtime/size + pid lock |
 | Active watches | **Done 0.6.0 / 0.8** | YAML + CLI + GUI **Vigilancia…** (tick) |
-| MCP server for agents | **Done 0.7–0.9** | 9 tools; plan/execute use `default_extractors` (0.8); opt-in `allowed_roots` jail (0.9) |
+| MCP server for agents | **Done 0.7–0.9** | 9 tools; plan/execute use `default_extractors` (0.8); writes require `allowed_roots` or `FILEWIZARD_SOURCE_ROOT` |
 | Extra backends (4B, NPU, …) | **Backlog 0.5+** | Same contract; catalog documents ids only |
 | Daemon / folder watch | **Done 0.6.0** | Polling loop; inotify nativo fuera de scope |
 | Packaging (Flatpak/AppImage) | **Partial 0.11** | `.desktop` + hicolor icon; Flatpak/AppImage not started |
@@ -315,7 +315,7 @@ MainWindow
 | Watch pid lock | `~/.local/share/filewizard/watch.lock` |
 | Active watches | `~/.local/share/filewizard/active_watches.yaml` |
 | GUI log | `~/.local/share/filewizard/filewizard.log` (1MB × 3) |
-| MCP jail config | `~/.local/share/filewizard/mcp.yaml` (opt-in `allowed_roots`; tool `state_dir` does not relocate this file) |
+| MCP jail config | `~/.local/share/filewizard/mcp.yaml` (`allowed_roots` required for execute/undo writes; tool `state_dir` does not relocate this file) |
 
 ### 3.7 Dependencies
 

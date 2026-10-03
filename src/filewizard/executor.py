@@ -401,6 +401,7 @@ def undo_operations(
     journal: Journal,
     rows: Iterable[Any],
     dry_run: bool = True,
+    cancel=None,
 ) -> list[dict[str, Any]]:
     """
     Undo previous moves using the journal.
@@ -411,12 +412,17 @@ def undo_operations(
       - If the moved file is missing, report missing (do not invent data).
       - If size recorded in journal does not match, refuse (state drift).
       - Double-undo is a no-op for already-undone rows (they leave last_successful_moves).
+      - ``cancel`` is checked between rows, not during a move.
     """
+
+    from .cancel import CancelledError
 
     results: list[dict[str, Any]] = []
     batch_id = uuid.uuid4().hex
 
     for row in rows:
+        if cancel is not None and cancel.is_cancelled():
+            raise CancelledError("Undo cancelled by user")
         original_op_id = int(row["id"])
         rule_id = str(row["rule_id"])
 

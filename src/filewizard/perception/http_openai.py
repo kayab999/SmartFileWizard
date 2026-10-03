@@ -11,6 +11,10 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+import httpx
+
+from ..cancel import CancelledError
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,6 +50,22 @@ def remote_perception_endpoints(config) -> list[str]:
 # local single-slot endpoints; parallel 120s calls pile up. probe_server
 # stays unlocked (fast reachability check only).
 _HTTP_LOCK = threading.Lock()
+_ACTIVE_GUARD = threading.Lock()
+_ACTIVE_CLIENT: httpx.Client | None = None
+
+
+def cancel_inflight_http() -> None:
+    """Abort the perception POST if one is in flight. Safe from another thread."""
+    with _ACTIVE_GUARD:
+        client = _ACTIVE_CLIENT
+    if client is not None:
+        client.close()
+
+
+def _bind_client(client: httpx.Client | None) -> None:
+    global _ACTIVE_CLIENT
+    with _ACTIVE_GUARD:
+        _ACTIVE_CLIENT = client
 
 
 def _resize_image_bytes(path: Path, max_edge: int) -> tuple[bytes, str]:
@@ -112,15 +132,10 @@ def chat_completion_with_image(
     }
 
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
 
     wait = max(1.0, float(timeout_s) + 5.0)
     acquired = _HTTP_LOCK.acquire(timeout=wait)
@@ -128,15 +143,26 @@ def chat_completion_with_image(
         raise RuntimeError(
             "OCR/vision HTTP slot busy (timed out waiting for in-flight call)"
         )
+    client = httpx.Client(timeout=timeout_s)
+    _bind_client(client)
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:500]
-        raise RuntimeError(f"HTTP {exc.code} from {url}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Cannot reach OCR/vision server at {url}: {exc}") from exc
+        response = client.post(url, content=body, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:500]
+        raise RuntimeError(
+            f"HTTP {exc.response.status_code} from {url}: {detail}"
+        ) from exc
+    except httpx.HTTPError as exc:
+        if client.is_closed:
+            raise CancelledError("perception HTTP cancelled") from exc
+        raise RuntimeError(
+            f"Cannot reach OCR/vision server at {url}: {exc}"
+        ) from exc
     finally:
+        _bind_client(None)
+        client.close()
         _HTTP_LOCK.release()
 
     try:

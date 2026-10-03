@@ -116,6 +116,7 @@ def build_server(name: str = "filewizard", title: str = "FileWizard"):
         enable_ocr: bool = False,
         enable_vision: bool = False,
         agent_features: dict | None = None,
+        allow_model_only: bool = False,
     ) -> dict:
         return _plan(
             source,
@@ -127,13 +128,15 @@ def build_server(name: str = "filewizard", title: str = "FileWizard"):
             enable_ocr=enable_ocr,
             enable_vision=enable_vision,
             agent_features=agent_features,
+            allow_model_only=allow_model_only,
         )
 
     @server.tool(
         name="filewizard_execute",
         description=(
             "Execute a classification plan (mutates files). Requires "
-            "confirm=true; otherwise returns a structured error."
+            "confirm=true and an MCP jail (mcp.yaml allowed_roots or "
+            "FILEWIZARD_SOURCE_ROOT). Otherwise returns a structured error."
         ),
     )
     def filewizard_execute(
@@ -147,6 +150,7 @@ def build_server(name: str = "filewizard", title: str = "FileWizard"):
         enable_ocr: bool = False,
         enable_vision: bool = False,
         agent_features: dict | None = None,
+        allow_model_only: bool = False,
     ) -> dict:
         return _execute(
             source,
@@ -159,6 +163,7 @@ def build_server(name: str = "filewizard", title: str = "FileWizard"):
             enable_ocr=enable_ocr,
             enable_vision=enable_vision,
             agent_features=agent_features,
+            allow_model_only=allow_model_only,
         )
 
     @server.tool(

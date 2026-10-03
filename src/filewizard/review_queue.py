@@ -112,6 +112,20 @@ class ReviewQueue:
     def pending(self) -> list[ReviewItem]:
         return [i for i in self.items if not i.resolved]
 
+    def add_model_hold(self, path: Path, reason: str, *, save: bool = True) -> None:
+        """Remember a file whose model match is not allowed to move it yet."""
+        self.add(
+            ReviewItem(
+                id=uuid.uuid4().hex[:12],
+                path=str(path),
+                category_hint="unknown",
+                reason=reason,
+                status="unknown",
+                created_at=datetime.now(timezone.utc).isoformat(),
+            ),
+            save=save,
+        )
+
     def add(
         self, item: ReviewItem, *, dedupe_path: bool = True, save: bool = True
     ) -> None:

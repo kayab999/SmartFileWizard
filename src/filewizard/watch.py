@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 import time
-import json
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -24,6 +25,8 @@ from .pipeline import (
 from .persist import atomic_write_text
 from .presets import PresetError, ensure_builtin_presets, load_preset
 from .scanner import iter_files
+
+logger = logging.getLogger(__name__)
 
 
 def interruptible_sleep(
@@ -70,6 +73,7 @@ class WatchConfig:
     ocr: bool = False
     vision: bool = False
     agent_features: Path | None = None
+    allow_model_only: bool = False
 
     def __post_init__(self) -> None:
         if bool(self.preset) == bool(self.rules):
@@ -155,7 +159,19 @@ def _watch_once_body(
             limit=cfg.limit,
             only_paths=only_paths,
             cancel=cancel,
+            allow_model_only=cfg.allow_model_only,
         )
+        held = [op for op in operations if op.status == "needs-review"]
+        if held:
+            from .review_queue import ReviewQueue
+
+            queue = ReviewQueue(state_dir=state_dir)
+            for op in held:
+                queue.add_model_hold(op.source, op.error or "", save=False)
+            try:
+                queue.save()
+            except OSError as exc:
+                logger.warning("review queue save failed: %s", exc)
 
         if not cfg.dry_run:
             operations = executor.execute(operations)

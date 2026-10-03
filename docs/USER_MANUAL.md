@@ -261,7 +261,7 @@ If there is no tray, close still quits (same as before).
 
 - Preview never moves files.
 - Apply asks for confirmation.
-- Closing a busy window offers **Esperar** or **Salir de todos modos**
+- Closing a busy window cancels after the current file and waits until that work stops. **Salir** on the home window quits, including when the app is in the tray. The first close that only hides the window says so in a tray message.
   (cancels when possible; an in-flight OCR/VLM call may finish its timeout).
 - Undo uses the same journal as the CLI (by batch).
 - Journal rows may show cascade evidence (category / stage / confidence).
@@ -400,6 +400,15 @@ rows can be purged:
 filewizard purge                       # preview
 filewizard purge --older-than-days 90 --execute
 ```
+
+**Check a recorded batch** (read-only):
+
+```bash
+filewizard verify                 # list batch ids already in the journal
+filewizard verify --batch <id>    # compare that batch with the files on disk
+```
+
+The check reads the paths stored for that batch. `FREEZE PASS` means each finished move is still where the journal recorded it, at the recorded size. `FREEZE FAIL` (exit status 1) means a file in that batch no longer matches, a row is still unfinished, or one of those paths is still unresolved in the review queue. The command leaves the journal, the queue, and your folders as they are.
 
 Review queue: `Limpiar resueltos` deletes resolved items; single items have no
 delete button yet — use `filewizard reset --yes` for a full queue wipe.
@@ -584,10 +593,12 @@ or, using the dedicated script:
 - **Optional sandbox (0.9+):** set `FILEWIZARD_SOURCE_ROOT=/home/user/Downloads`
   (hard jail; cannot be skipped by tool arguments) **or** add `allowed_roots`
   to `~/.local/share/filewizard/mcp.yaml` (not the tool-call `state_dir`).
-  Plan/execute sources *and* destinations outside those roots → structured
-  error; `confirm=true` does not bypass it. Unset = same power as CLI.
-  If `mcp.yaml` exists but is unreadable, MCP mutate tools **fail closed**
-  (error), they do not silently disable the jail.
+  **Writes require a jail.** `filewizard_execute` and a confirming
+  `filewizard_undo_batch` return
+  `Jail no configurado: Operaciones de escritura deshabilitadas` until
+  `allowed_roots` or `FILEWIZARD_SOURCE_ROOT` is set. `confirm=true` does not
+  bypass a path outside those roots. If `mcp.yaml` exists but is unreadable,
+  MCP mutate tools **fail closed**.
 - **`filewizard_collect_facts` is jailed** like plan/execute when roots are
   set; `filewizard_undo_batch` refuses batches touching paths outside roots
   (fail-closed, dry-run included).
