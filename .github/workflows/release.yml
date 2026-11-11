@@ -27,6 +27,8 @@ jobs:
         # Strict: no fallback — a failed Qt install must fail the release gate.
         run: pip install -e ".[dev,ui,redos]"
       - name: pytest
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: pytest -q
       - name: ruff
         run: pip install "ruff==0.15.15" && ruff check src/ tests/

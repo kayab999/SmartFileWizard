@@ -666,7 +666,7 @@ class ReviewPage(QWidget):
 
         if item.childCount() == 1:
             child = item.child(0)
-            if child.data(0, _PLACEHOLDER_ROLE) != "placeholder":
+            if child is None or child.data(0, _PLACEHOLDER_ROLE) != "placeholder":
                 return
         elif item.childCount() > 0:
             return

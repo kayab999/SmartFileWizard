@@ -50,12 +50,9 @@ PLUGIN_ENTRY_POINT_GROUP = "filewizard.extractors"
 def load_plugin_extractors(group: str = PLUGIN_ENTRY_POINT_GROUP) -> list[Any]:
     """Instantiate registered third-party extractors (best-effort)."""
     out: list[Any] = []
-    try:
-        eps = entry_points(group=group)
-    except TypeError:  # Python 3.9 fallback API
-        eps = list(  # type: ignore[assignment]
-            ep for ep in entry_points() if ep.group == group
-        )
+    # importlib.metadata.entry_points(group=...) is available on Python
+    # >= 3.10; this project requires >= 3.11, so no legacy fallback.
+    eps = entry_points(group=group)
     for ep in eps:
         try:
             obj = ep.load()
