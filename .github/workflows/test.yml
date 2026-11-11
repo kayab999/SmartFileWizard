@@ -30,7 +30,19 @@ jobs:
           # (PySide6 shutdown-order segfaults have been observed on
           # runners; the stack pinpoints the leaking QObject).
           PYTHONFAULTHANDLER: 1
-        run: pytest -q
+        # pytest.main() runs the full session (coverage data + report and
+        # the cov-fail-under gate are finalized inside it, before it
+        # returns); os._exit() then skips interpreter finalization, which
+        # is where shiboken6/PySide6 can segfault after a green run.
+        run: |
+          python - <<'PYEOF'
+          import os, sys
+          import pytest
+          code = pytest.main(["-q"])
+          sys.stdout.flush()
+          sys.stderr.flush()
+          os._exit(code)
+          PYEOF
   lint:
     runs-on: ubuntu-latest
     steps:

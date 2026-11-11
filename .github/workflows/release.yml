@@ -29,7 +29,18 @@ jobs:
       - name: pytest
         env:
           QT_QPA_PLATFORM: offscreen
-        run: pytest -q
+        # Same hard-exit pattern as test.yml: coverage and the gate are
+        # finalized inside pytest.main(); os._exit() skips the interpreter
+        # finalization where PySide6 can segfault after a green run.
+        run: |
+          python - <<'PYEOF'
+          import os, sys
+          import pytest
+          code = pytest.main(["-q"])
+          sys.stdout.flush()
+          sys.stderr.flush()
+          os._exit(code)
+          PYEOF
       - name: ruff
         run: pip install "ruff==0.15.15" && ruff check src/ tests/
 
