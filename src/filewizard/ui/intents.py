@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -16,6 +17,8 @@ class Intent:
     rules_file: str | None = None
     # Named preset in ~/.local/share/filewizard/presets/ (preferred over rules_file).
     preset_name: str | None = None
+    # C3: pre-fill the wizard source (e.g. dropped folder on the home).
+    default_source: Path | None = None
 
 
 INTENTS = [

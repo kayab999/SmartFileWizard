@@ -57,15 +57,17 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout(central)
 
-        title = QLabel("¿Qué quieres hacer?")
+        title = QLabel(self.tr("¿Qué quieres hacer?"))
         font = title.font()
         font.setPointSize(18)
         font.setBold(True)
         title.setFont(font)
 
         subtitle = QLabel(
-            "Reglas locales, dry-run, journal y undo. "
-            "La percepción aporta evidencia; las reglas deciden."
+            self.tr(
+                "Reglas locales, dry-run, journal y undo. "
+                "La percepción aporta evidencia; las reglas deciden."
+            )
         )
         subtitle.setObjectName("muted")
         subtitle.setWordWrap(True)
@@ -84,27 +86,37 @@ class MainWindow(QMainWindow):
 
         top_row = QHBoxLayout()
         top_row.addWidget(title, 1)
-        self.review_btn = BadgeButton("Cola de revisión")
-        self.review_btn.setAccessibleName("Cola de revisión")
+        self.review_btn = BadgeButton(self.tr("Cola de revisión"))
+        self.review_btn.setAccessibleName(self.tr("Cola de revisión"))
         self.review_btn.setToolTip(
-            "Archivos unknown / baja confianza de la cascada de percepción"
+            self.tr(
+                "Archivos unknown / baja confianza de la cascada de percepción"
+            )
         )
         self.review_btn.clicked.connect(self.open_review_queue)
-        watch_btn = QPushButton("Vigilancia…")
-        watch_btn.setAccessibleName("Vigilancia")
-        watch_btn.setToolTip("Watches activos: un tick (dry-run o aplicar)")
+        watch_btn = QPushButton(self.tr("Vigilancia…"))
+        watch_btn.setAccessibleName(self.tr("Vigilancia"))
+        watch_btn.setToolTip(
+            self.tr("Watches activos: un tick (dry-run o aplicar)")
+        )
         watch_btn.clicked.connect(self.open_watch)
-        settings_btn = QPushButton("Ajustes…")
-        settings_btn.setAccessibleName("Ajustes de percepción")
-        settings_btn.setToolTip("Percepción: OCR / visión / modelos / endpoints")
+        settings_btn = QPushButton(self.tr("Ajustes…"))
+        settings_btn.setAccessibleName(self.tr("Ajustes de percepción"))
+        settings_btn.setToolTip(
+            self.tr("Percepción: OCR / visión / modelos / endpoints")
+        )
         settings_btn.clicked.connect(self.open_settings)
-        support_btn = QPushButton("Apoyar…")
-        support_btn.setAccessibleName("Apoyar FileWizard")
-        support_btn.setToolTip("Buy Me a Coffee y el repositorio en GitHub")
+        support_btn = QPushButton(self.tr("Apoyar…"))
+        support_btn.setAccessibleName(self.tr("Apoyar FileWizard"))
+        support_btn.setToolTip(
+            self.tr("Buy Me a Coffee y el repositorio en GitHub")
+        )
         support_btn.clicked.connect(self.open_support)
-        quit_btn = QPushButton("Salir")
-        quit_btn.setAccessibleName("Salir de FileWizard")
-        quit_btn.setToolTip("Cierra FileWizard, también si sigue en la bandeja")
+        quit_btn = QPushButton(self.tr("Salir"))
+        quit_btn.setAccessibleName(self.tr("Salir de FileWizard"))
+        quit_btn.setToolTip(
+            self.tr("Cierra FileWizard, también si sigue en la bandeja")
+        )
         quit_btn.clicked.connect(self.quit_application)
         top_row.addWidget(self.review_btn)
         top_row.addWidget(watch_btn)
@@ -118,17 +130,18 @@ class MainWindow(QMainWindow):
         layout.addLayout(grid)
 
         # --- Biblioteca de presets ---
-        presets_group = QGroupBox("Biblioteca de presets")
+        presets_group = QGroupBox(self.tr("Biblioteca de presets"))
         playout = QHBoxLayout(presets_group)
         self.preset_combo = QComboBox()
         self.preset_combo.setMinimumWidth(220)
-        run_preset_btn = QPushButton("Ejecutar preset…")
+        self.preset_combo.setAccessibleName(self.tr("Biblioteca de presets"))
+        run_preset_btn = QPushButton(self.tr("Ejecutar preset…"))
         run_preset_btn.setObjectName("btnPrimary")
         run_preset_btn.setToolTip(
-            "Abre el wizard en modo cascada con el RuleSet del preset."
+            self.tr("Abre el wizard en modo cascada con el RuleSet del preset.")
         )
         run_preset_btn.clicked.connect(self.run_selected_preset)
-        refresh_presets_btn = QPushButton("Refrescar")
+        refresh_presets_btn = QPushButton(self.tr("Refrescar"))
         refresh_presets_btn.clicked.connect(self.refresh_presets)
         playout.addWidget(self.preset_combo, 1)
         playout.addWidget(run_preset_btn)
@@ -136,7 +149,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(presets_group)
 
         # --- Historial por lotes ---
-        history_group = QGroupBox("Historial de operaciones")
+        history_group = QGroupBox(self.tr("Historial de operaciones"))
         hlayout = QVBoxLayout(history_group)
 
         self.banner = QFrame()
@@ -144,9 +157,9 @@ class MainWindow(QMainWindow):
         banner_layout = QHBoxLayout(self.banner)
         banner_layout.setContentsMargins(12, 8, 12, 8)
 
-        self.banner_label = QLabel("Sin operaciones todavía.")
+        self.banner_label = QLabel(self.tr("Sin operaciones todavía."))
         self.banner_label.setWordWrap(True)
-        self.banner_undo = QPushButton("Deshacer este lote")
+        self.banner_undo = QPushButton(self.tr("Deshacer este lote"))
         self.banner_undo.setObjectName("btnPrimary")
         self.banner_undo.clicked.connect(self.undo_last_batch)
 
@@ -164,12 +177,16 @@ class MainWindow(QMainWindow):
         self.history_scroll.setWidget(self._batch_host)
 
         hbuttons = QHBoxLayout()
-        refresh_btn = QPushButton("Refrescar")
+        refresh_btn = QPushButton(self.tr("Refrescar"))
         refresh_btn.clicked.connect(self.refresh_journal)
-        verify_btn = QPushButton("Verificar…")
-        verify_btn.setAccessibleName("Verificar operaciones needs_verify")
+        verify_btn = QPushButton(self.tr("Verificar…"))
+        verify_btn.setAccessibleName(
+            self.tr("Verificar operaciones needs_verify")
+        )
         verify_btn.setToolTip(
-            "Comprueba causalidad y operaciones pendientes de verificación"
+            self.tr(
+                "Comprueba causalidad y operaciones pendientes de verificación"
+            )
         )
         verify_btn.clicked.connect(self.run_verify)
         hbuttons.addWidget(refresh_btn)
@@ -182,8 +199,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(history_group)
 
         footer = QLabel(
-            "Principio del motor: percepción → evidencia; "
-            "reglas → decisión; journal → undo."
+            self.tr(
+                "Principio del motor: percepción → evidencia; "
+                "reglas → decisión; journal → undo."
+            )
         )
         footer.setObjectName("footer")
         footer.setWordWrap(True)
@@ -193,6 +212,43 @@ class MainWindow(QMainWindow):
         self.refresh_presets()
         self.refresh_journal()
         self.refresh_review_badge()
+
+        # C3: drop a folder anywhere on the home screen to open it in the
+        # wizard (same as choosing "Organizar…").
+        self.setAcceptDrops(True)
+
+    # --- C3: drag & drop a directory onto the home screen ---
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
+        if any(u.isLocalFile() and Path(u.toLocalFile()).is_dir() for u in urls):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        dirs = [
+            Path(u.toLocalFile())
+            for u in event.mimeData().urls()
+            if u.isLocalFile() and Path(u.toLocalFile()).is_dir()
+        ]
+        if not dirs:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        source = dirs[0]
+        # Reuse the "organize" intent, pointed at the dropped folder.
+        base = INTENTS[0]
+        intent = Intent(
+            id=base.id,
+            title=base.title,
+            description=base.description,
+            condition=base.condition,
+            action=base.action,
+            rules_file=base.rules_file,
+            preset_name=base.preset_name,
+            default_source=source,
+        )
+        self.open_intent(intent)
 
     def run_verify(self) -> None:
         from .verify_dialog import VerifyDialog

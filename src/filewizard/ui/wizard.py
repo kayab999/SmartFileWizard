@@ -63,9 +63,13 @@ class SourcePage(QWidget):
 
         self.source_edit = QLineEdit()
         self.source_edit.setAccessibleName("Carpeta origen")
-        default_source = Path.home() / "Downloads"
-        if not default_source.exists():
-            default_source = Path.home()
+        # C3: an intent can carry a pre-selected source (dropped folder).
+        if getattr(intent, "default_source", None) is not None:
+            default_source = Path(intent.default_source)
+        else:
+            default_source = Path.home() / "Downloads"
+            if not default_source.exists():
+                default_source = Path.home()
         self.source_edit.setText(str(default_source))
 
         browse_button = QPushButton("Examinar...")

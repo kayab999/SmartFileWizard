@@ -553,11 +553,23 @@ def update_cmd() -> None:
     default=Path("~/.local/share/filewizard").expanduser(),
     help="State directory.",
 )
-def doctor_cmd(state_dir: Path) -> None:
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Emit machine-readable JSON.",
+)
+def doctor_cmd(state_dir: Path, json_output: bool) -> None:
     """Diagnose the local FileWizard installation."""
     from .doctor import doctor_report
 
     report = doctor_report(state_dir)
+    if json_output:
+        import json
+
+        click.echo(json.dumps(report, default=str))
+        return
     click.echo(f"FileWizard {report['version']} — Python {report['python']}")
     click.echo(f"State: {report['state_dir']}")
     for check in report["checks"]:
@@ -597,14 +609,43 @@ def benchmark_cmd(source: Path, iterations: int, limit: int) -> None:
     default=Path("~/.local/share/filewizard").expanduser(),
     help="State and journal directory.",
 )
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Emit machine-readable JSON.",
+)
 @click.pass_context
-def verify_cmd(ctx: click.Context, batch_id: str | None, state_dir: Path) -> None:
+def verify_cmd(ctx: click.Context, batch_id: str | None, state_dir: Path, json_output: bool = False) -> None:
     """Compare a recorded batch with the files on disk. Reads only."""
 
     state_dir = state_dir.expanduser().resolve()
     journal_path = state_dir / "journal.db"
     if not batch_id:
-        click.echo(format_batch_list(list_batches(journal_path)))
+        if json_output:
+            import json as _json
+
+            listing = list_batches(journal_path)
+            click.echo(
+                _json.dumps(
+                    {
+                        "problem": listing.problem,
+                        "batches": [
+                            {
+                                "batch_id": b.batch_id,
+                                "started_at": b.started_at,
+                                "done": b.done,
+                                "total": b.total,
+                            }
+                            for b in listing.batches
+                        ],
+                    },
+                    default=str,
+                )
+            )
+        else:
+            click.echo(format_batch_list(list_batches(journal_path)))
         return
 
     report = verify_batch(
@@ -612,7 +653,34 @@ def verify_cmd(ctx: click.Context, batch_id: str | None, state_dir: Path) -> Non
         batch_id,
         review_queue_path=state_dir / "review_queue.json",
     )
-    click.echo(format_report(report))
+    if json_output:
+        import json as _json
+
+        click.echo(
+            _json.dumps(
+                {
+                    "batch_id": report.batch_id,
+                    "found": report.found,
+                    "problem": report.problem,
+                    "done": report.done,
+                    "holds": report.holds,
+                    "divergences": [
+                        {
+                            "operation_id": d.operation_id,
+                            "op": d.op,
+                            "status": d.status,
+                            "detail": d.detail,
+                        }
+                        for d in report.divergences
+                    ],
+                    "awaiting_review": list(report.awaiting_review),
+                    "passed": report.passed,
+                },
+                default=str,
+            )
+        )
+    else:
+        click.echo(format_report(report))
     if not report.passed:
         ctx.exit(1)
 
@@ -759,6 +827,55 @@ def _run_watch_loop(
 @cli.group("watch")
 def watch_cmd() -> None:
     """Watch folders: single tick, polling loop, or active watches."""
+
+
+@watch_cmd.command("list")
+@click.option(
+    "--state-dir",
+    type=click.Path(path_type=Path),
+    default=Path("~/.local/share/filewizard").expanduser(),
+    help="State directory.",
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Emit machine-readable JSON.",
+)
+def watch_list(state_dir: Path, json_output: bool) -> None:
+    """List active watches."""
+    from .watch import load_active_watches
+
+    state_dir = state_dir.expanduser().resolve()
+    watches = load_active_watches(state_dir)
+    if json_output:
+        import json
+
+        click.echo(
+            json.dumps(
+                [
+                    {
+                        "name": w.name,
+                        "source": str(w.source),
+                        "preset": w.preset,
+                        "rules": str(w.rules) if w.rules else None,
+                        "interval_s": w.interval_s,
+                        "dry_run": w.dry_run,
+                    }
+                    for w in watches
+                ]
+            )
+        )
+        return
+    if not watches:
+        click.echo(f"No active watches in {state_dir}.")
+        return
+    for w in watches:
+        mode = "dry-run" if w.dry_run else "execute"
+        click.echo(
+            f"  {w.name:20} {w.source}  interval={w.interval_s}s  {mode}"
+        )
 
 
 @watch_cmd.command("once")
@@ -1147,11 +1264,34 @@ def presets_cmd() -> None:
     type=click.Path(path_type=Path),
     default=Path("~/.local/share/filewizard").expanduser(),
 )
-def presets_list(state_dir: Path) -> None:
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Emit machine-readable JSON.",
+)
+def presets_list(state_dir: Path, json_output: bool) -> None:
     """List presets in the library."""
     state_dir = state_dir.expanduser().resolve()
     ensure_builtin_presets(state_dir)
     items = list_presets(state_dir)
+    if json_output:
+        import json
+
+        click.echo(
+            json.dumps(
+                [
+                    {
+                        "name": item.name,
+                        "rule_count": item.rule_count,
+                        "description": item.description,
+                    }
+                    for item in items
+                ]
+            )
+        )
+        return
     if not items:
         click.echo(f"No presets in {presets_dir(state_dir)}")
         return
@@ -1294,7 +1434,16 @@ def cache_purge(state_dir: Path, yes: bool) -> None:
     type=click.Choice(sorted(PROFILES.keys())),
     default=None,
 )
-def perception_status_cmd(state_dir: Path, profile: str | None) -> None:
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Emit machine-readable JSON.",
+)
+def perception_status_cmd(
+    state_dir: Path, profile: str | None, json_output: bool
+) -> None:
     """Show perception config and endpoint health."""
     state_dir = state_dir.expanduser().resolve()
     cfg = (
@@ -1303,6 +1452,11 @@ def perception_status_cmd(state_dir: Path, profile: str | None) -> None:
         else load_perception_config(state_dir=state_dir)
     )
     status = perception_status(cfg, state_dir=state_dir)
+    if json_output:
+        import json
+
+        click.echo(json.dumps(status, default=str))
+        return
     click.echo(f"Profile: {status.get('profile') or '(file/default)'}")
     click.echo(f"Heuristics: {status['heuristics']}")
     click.echo(

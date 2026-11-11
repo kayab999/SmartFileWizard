@@ -33,6 +33,7 @@ class BadgeButton(QPushButton):
     def __init__(self, text: str, parent=None):
         super().__init__(text, parent)
         self._badge = ""
+        self.setAccessibleName(text)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_badge(self, text: str) -> None:

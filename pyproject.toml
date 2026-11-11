@@ -57,7 +57,7 @@ include = ["filewizard*"]
 version = {attr = "filewizard.__version__"}
 
 [tool.setuptools.package-data]
-filewizard = ["ui/assets/*", "ui/*.qss"]
+filewizard = ["ui/assets/*", "ui/*.qss", "ui/i18n/*.qm", "ui/i18n/*.ts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
