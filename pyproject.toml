@@ -62,3 +62,10 @@ filewizard = ["ui/assets/*", "ui/*.qss"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "--cov=src/filewizard --cov-report=term-missing --cov-fail-under=50"
+
+[tool.coverage.run]
+omit = ["src/filewizard/ui/*"]
+
+[tool.coverage.report]
+fail_under = 50

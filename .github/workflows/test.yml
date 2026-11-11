@@ -32,3 +32,16 @@ jobs:
         run: pip install "ruff==0.15.15"
       - name: Lint
         run: ruff check src/ tests/
+
+  typecheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[dev,ui]" mypy types-PyYAML
+      - name: Type check (informational)
+        run: mypy src/filewizard --ignore-missing-imports || true
