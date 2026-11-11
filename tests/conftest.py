@@ -30,6 +30,14 @@ def _qt_deterministic_teardown():
     # that did not go through qtbot fixtures).
     for widget in app.topLevelWidgets():
         widget.close()
+    # Schedule deferred deletion of every QObject still parented to the
+    # app — including non-widget QtNetwork objects (e.g. QLocalServer)
+    # whose destruction during interpreter shutdown segfaults on some
+    # runner/PySide6 combinations.
+    from PySide6.QtCore import QObject
+
+    for obj in list(app.findChildren(QObject)):
+        obj.deleteLater()
     # Run pending deleteLater() calls while the event system is alive.
     app.processEvents()
     app.sendPostedEvents(None, QEvent.Type.DeferredDelete)

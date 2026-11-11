@@ -262,7 +262,7 @@ def test_cancel_inflight_http_closes_the_client(tmp_path: Path) -> None:
     assert error and isinstance(error[0], CancelledError)
 
 
-def test_single_instance_second_launch_signals_the_first() -> None:
+def test_single_instance_second_launch_signals_the_first(qtbot) -> None:
     pytest.importorskip("PySide6")
     import os
 
@@ -271,11 +271,18 @@ def test_single_instance_second_launch_signals_the_first() -> None:
 
     from filewizard.ui.single_instance import claim_primary
 
-    app = QApplication.instance() or QApplication([])
+    app = QApplication.instance()
     name = "filewizard-gui-test-lifecycle"
     first = claim_primary(name)
     assert first is not None
-    first.setParent(app)
-    second = claim_primary(name)
-    assert second is None
-    first.close()
+    try:
+        second = claim_primary(name)
+        assert second is None
+    finally:
+        # Destroy the QLocalServer deterministically while the app is
+        # alive: a QtNetwork object parented to the application has been
+        # observed to segfault during interpreter shutdown on CI.
+        first.close()
+        first.deleteLater()
+        if app is not None:
+            app.processEvents()
