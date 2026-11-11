@@ -309,8 +309,16 @@ def test_reconcile_same_size_other_file_stays_pending(tmp_path) -> None:
         )
         os.rename(src, dst)
         # A different file object with the same size replaces the moved one.
+        # Allocate the replacement BEFORE unlinking: while dst's inode is
+        # still live, the new file must get a different inode — ext4/overlay
+        # on CI runners immediately reuse the freed inode after unlink(),
+        # which would make E2 (size+dev+ino) evidence legitimately match and
+        # promote the row (a real fs behaviour, not a bug in reconcile).
+        same_size_other = tmp_path / "replacement.bin"
+        _big_file(same_size_other)
+        assert same_size_other.stat().st_ino != stat_before.st_ino
         dst.unlink()
-        _big_file(dst)
+        os.rename(same_size_other, dst)
         _rewind_to_pending(journal, op_id)
 
         promoted, pending = journal.reconcile_pending()
@@ -1752,6 +1760,7 @@ def test_watch_warns_destination_inside_tree(tmp_path, caplog) -> None:
 
 def _tiny_png(tmp_path: Path, width: int, height: int) -> Path:
     """A real PNG with big header dimensions and tiny compressed body."""
+    pytest.importorskip("PIL", reason="PNG fixture needs Pillow")
     from PIL import Image
 
     p = tmp_path / f"bomb_{width}x{height}.png"

@@ -601,7 +601,10 @@ def test_r87_source_change_during_copy_retains_original_and_no_destination(
 
 @pytest.mark.parametrize("tag", ["after_displace_intent", "after_displace"])
 def test_r88_w1_w2_resolve_pending_after_real_owner_death(tmp_path, tag) -> None:
-    from tests.test_integrity_remediation import (
+    # Sibling-module import: pytest's prepend import mode puts tests/ on
+    # sys.path, so this works under both `pytest` and `python -m pytest`
+    # (an absolute `tests.` import only works in the latter).
+    from test_integrity_remediation import (
         _crash_child_script,
         _run_crash_child,
     )

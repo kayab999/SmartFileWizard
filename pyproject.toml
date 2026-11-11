@@ -40,6 +40,9 @@ dev = [
     "pytest-cov>=5.0",
     "hypothesis>=6.100",
     "pytest-qt>=4.4",
+    # Test fixtures generate real PNGs (PIL) even without the [images]
+    # extra installed; keep the suite self-contained in CI.
+    "pillow>=10.0",
 ]
 redos = [
     "regex>=2024.0",

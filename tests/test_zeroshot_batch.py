@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+# Fixtures open/save real PNGs; skip cleanly where Pillow is absent.
+pytest.importorskip("PIL")
+
 from filewizard.perception.zeroshot import (
     LABEL_PROMPTS,
     Stage1BatchQueue,
