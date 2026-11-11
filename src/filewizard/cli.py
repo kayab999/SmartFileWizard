@@ -102,10 +102,15 @@ def echo_operation(op: PlannedOperation, verbose: bool) -> None:
 
 @click.group()
 @click.version_option(version=__version__, prog_name="filewizard")
-def cli() -> None:
+@click.option("--lang", default=None, help="UI language (en, es).")
+def cli(lang: str | None) -> None:
     """
     FileWizard: rule-based file classification and organization engine.
     """
+    if lang:
+        import os
+
+        os.environ["FILEWIZARD_LANG"] = lang
 
 
 @cli.command("run")
@@ -517,6 +522,19 @@ def undo(
             click.echo("Undo summary:")
             for status, count in counts.items():
                 click.echo(f"  {status}: {count}")
+
+
+@cli.command("update")
+def update_cmd() -> None:
+    """Check for a newer FileWizard release."""
+    from . import __version__
+    from .update import update_notice
+
+    notice = update_notice(__version__)
+    if notice:
+        click.echo(notice)
+    else:
+        click.echo("You are up to date (or offline).")
 
 
 @cli.command("doctor")

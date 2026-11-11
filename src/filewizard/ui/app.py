@@ -30,6 +30,16 @@ def main() -> None:
     setup_gui_logging(state_dir)
 
     app = QApplication(sys.argv)
+    import os
+
+    lang = os.environ.get("FILEWIZARD_LANG")
+    if lang:
+        from PySide6.QtCore import QLocale, QTranslator
+
+        translator = QTranslator()
+        if translator.load(f"filewizard_{lang}", str(Path(__file__).parent / "i18n")):
+            app.installTranslator(translator)
+            QLocale.setDefault(QLocale(lang))
     from .single_instance import accept_show_requests, claim_primary
 
     primary = claim_primary()
