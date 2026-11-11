@@ -85,10 +85,8 @@ def _status_from_identity(
             return "needs_verify"
         st = destination.stat()
         if sha256 is not None:
-            from .perception.cache import MAX_CACHE_FILE_BYTES, file_content_hash
+            from .perception.cache import file_content_hash
 
-            if int(st.st_size) > MAX_CACHE_FILE_BYTES:
-                return "needs_verify"
             return (
                 "done"
                 if file_content_hash(destination) == sha256

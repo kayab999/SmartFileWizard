@@ -1114,12 +1114,12 @@ def test_undo_big_file_records_identity_without_hash(tmp_path) -> None:
     dst = tmp_path / "out" / "big.bin"
     dst.parent.mkdir()
     with Journal(tmp_path / "journal.db") as journal:
-        rows = _exec_move(journal, src, dst, expected_status="needs_verify")
+        rows = _exec_move(journal, src, dst)
         results = undo_operations(journal=journal, rows=rows, dry_run=False)
-        assert results[0]["status"] == "needs_verify"
+        assert results[0]["status"] == "done"
         undo_row = journal.recent_operations(limit=1)[0]
         assert str(undo_row["op"]) == "undo"
-        assert undo_row["content_sha256"] is None  # > 64MiB by design
+        assert undo_row["content_sha256"] is not None
         assert undo_row["source_dev"] is not None
         assert undo_row["source_ino"] is not None
         assert int(undo_row["byte_size"]) == 65 * 1024 * 1024
@@ -1393,7 +1393,10 @@ def test_jail_destination_symlink_escaping_root(tmp_path, monkeypatch) -> None:
     )
     _apply_destination_jail([op], roots)
     assert op.status == "error"
-    assert op.error == "destination outside allowed_roots"
+    assert op.error in {
+            "destination outside allowed_roots",
+            "destination contains a symlink component (fail-closed)",
+        }
 
 
 def test_jail_unresolvable_destination_is_error_not_skip(

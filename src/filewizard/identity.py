@@ -1,7 +1,7 @@
 """Identity of a file at plan time, checked again before a move is trusted.
 
-Files at most 64MiB also get a SHA-256. Larger files keep size, mtime,
-device, and inode. A sampled hash is not used.
+Every regular file gets a streaming SHA-256, regardless of size. The
+perception-cache size cap (64 MiB) is unrelated to integrity evidence.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from .perception.cache import MAX_CACHE_FILE_BYTES, file_content_hash
+from .perception.cache import file_content_hash
 
 
 @dataclass(frozen=True)
@@ -31,11 +31,10 @@ def capture_identity(path: Path) -> FileIdentity | None:
     except OSError:
         return None
     digest: str | None = None
-    if 0 <= st.st_size <= MAX_CACHE_FILE_BYTES:
-        try:
-            digest = file_content_hash(path)
-        except OSError:
-            digest = None
+    try:
+        digest = file_content_hash(path)
+    except OSError:
+        digest = None
     return FileIdentity(
         size=int(st.st_size),
         mtime_ns=int(st.st_mtime_ns),

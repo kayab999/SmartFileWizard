@@ -117,12 +117,30 @@ def mcp_allowed_roots(state_dir: Path | str | None = None) -> list[Path]:
     return out
 
 
+def _has_symlink_component(path: Path) -> bool:
+    """R8/P0-3: a destination whose path contains a symlink is not trusted."""
+    try:
+        current = Path(path).expanduser()
+        if not current.is_absolute():
+            current = Path.cwd() / current
+        for parent in (current, *current.parents):
+            if parent.is_symlink():
+                return True
+    except OSError:
+        return True
+    return False
+
+
 def _path_within(path: Path, roots: list[Path]) -> bool:
     if not roots:
         return True
+    if _has_symlink_component(path):
+        return False
     try:
         resolved = path.expanduser().resolve()
     except OSError:
+        return False
+    if _has_symlink_component(resolved):
         return False
     return any(resolved == root or root in resolved.parents for root in roots)
 
@@ -188,13 +206,17 @@ def _apply_destination_jail(
     for op in operations:
         if op.destination is None or op.status == "error":
             continue
+        if _has_symlink_component(op.destination):
+            op.status = "error"
+            op.error = "destination contains a symlink component (fail-closed)"
+            continue
         try:
             dest = op.destination.expanduser().resolve()
         except (OSError, RuntimeError) as exc:
             op.status = "error"
             op.error = f"destination cannot be resolved for jail check: {exc}"
             continue
-        if not _path_within(dest, roots):
+        if _has_symlink_component(dest) or not _path_within(dest, roots):
             op.status = "error"
             op.error = "destination outside allowed_roots"
 
