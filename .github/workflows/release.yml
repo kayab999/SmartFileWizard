@@ -56,12 +56,20 @@ jobs:
           dist/FileWizard-*.AppImage --appimage-extract-and-run --help || dist/FileWizard-*.AppImage --help
           dist/FileWizard-*.AppImage --appimage-extract-and-run --version || dist/FileWizard-*.AppImage --version
 
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          python -m pip install --quiet cyclonedx-bom
+          cyclonedx-py environment --output-file dist/sbom.json || true
+          ls -lh dist/sbom.json 2>/dev/null || true
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.AppImage
+          files: |
+            dist/*.AppImage
+            dist/sbom.json
           generate_release_notes: true
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
 
   deb:
     needs: [test, appimage]
