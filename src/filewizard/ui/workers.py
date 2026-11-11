@@ -137,16 +137,29 @@ class PreviewWorker(QThread):
                         op.source, op.error or "", save=False
                     )
 
+            enqueue_note = ""
             try:
-                review_queue.save()
+                # WP-D2 (F-11): enqueue commits under the lock with a
+                # merge, so it can never clobber a concurrent writer
+                # (e.g. a running watcher enqueuing its own holds).
+                review_queue.merge_new_items()
             except Exception as exc:
                 logger.warning("review queue save failed: %s", exc)
+                # The holds did NOT reach the queue: never claim success.
+                enqueue_note = (
+                    "aviso: la cola de revisión no se pudo escribir "
+                    "(bloqueada o sin permisos); los pendientes NO "
+                    "quedaron encolados"
+                )
+            # Surfaced by the wizard as a warning (NOT via the error
+            # slot, which aborts the preview).
+            self.enqueue_note = enqueue_note
 
             self.done.emit(operations, scanned, "")
 
         except CancelledError:
             try:
-                review_queue.save()
+                review_queue.merge_new_items()
             except Exception as exc:
                 logger.warning("review queue save failed: %s", exc)
             self.done.emit([], 0, "cancelado")

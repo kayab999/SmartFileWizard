@@ -233,7 +233,11 @@ def test_cancel_inflight_http_closes_the_client(tmp_path: Path) -> None:
     with (
         pytest.MonkeyPatch.context() as patch,
     ):
-        patch.setattr(http_openai, "_resize_image_bytes", lambda path, edge: (b"img", "image/png"))
+        patch.setattr(
+            http_openai,
+            "_resize_image_bytes",
+            lambda path, edge, **kwargs: (b"img", "image/png"),
+        )
         patch.setattr(http_openai.httpx.Client, "post", blocking_post)
         error: list[BaseException] = []
 

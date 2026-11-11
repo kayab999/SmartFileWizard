@@ -34,8 +34,12 @@ class TesseractOcrExtractor:
         if not _is_image(path):
             return {}
         try:
-            from PIL import Image
+            import importlib.util
+
             import pytesseract
+
+            if importlib.util.find_spec("PIL") is None:
+                raise ImportError("PIL")
         except ImportError:
             return {
                 "ocr": {
@@ -43,21 +47,38 @@ class TesseractOcrExtractor:
                     "provider": "tesseract",
                 }
             }
+        from .imagelimits import ImageLimitError, open_image_bounded
+
         try:
-            # image_to_string blocks until Tesseract exits. Cancel is
-            # observed only after this call returns.
-            with Image.open(path) as img:
+            # Resource caps (WP-D1): byte/pixel limits before decode;
+            # timeout so a wedged tesseract child cannot hang the tick.
+            with open_image_bounded(
+                path,
+                max_bytes=self.settings.max_image_bytes,
+                max_pixels=self.settings.max_image_pixels,
+            ) as img:
                 if self.settings.langs:
                     text = pytesseract.image_to_string(
-                        img, lang=self.settings.langs
+                        img,
+                        lang=self.settings.langs,
+                        timeout=self.settings.timeout_s,
                     )
                 else:
-                    text = pytesseract.image_to_string(img)
+                    text = pytesseract.image_to_string(
+                        img, timeout=self.settings.timeout_s
+                    )
             return {
                 "ocr": {
                     "text": text.strip(),
                     "provider": "tesseract",
                     "model": "tesseract",
+                }
+            }
+        except ImageLimitError as exc:
+            return {
+                "ocr": {
+                    "error": str(exc),
+                    "provider": "tesseract",
                 }
             }
         except Exception as exc:
@@ -100,6 +121,11 @@ class LlamaHttpOcrExtractor:
                 timeout_s=self.settings.timeout_s,
                 max_image_edge=self.settings.max_image_edge,
                 temperature=self.settings.temperature,
+                max_image_bytes=self.settings.max_image_bytes,
+                max_image_pixels=self.settings.max_image_pixels,
+                max_upload_bytes=self.settings.max_upload_bytes,
+                max_response_bytes=self.settings.max_response_bytes,
+                allow_remote=self.allow_remote,
             )
             return {
                 "ocr": {
@@ -147,6 +173,11 @@ class LlamaHttpVisionExtractor:
                 timeout_s=self.settings.timeout_s,
                 max_image_edge=self.settings.max_image_edge,
                 temperature=self.settings.temperature,
+                max_image_bytes=self.settings.max_image_bytes,
+                max_image_pixels=self.settings.max_image_pixels,
+                max_upload_bytes=self.settings.max_upload_bytes,
+                max_response_bytes=self.settings.max_response_bytes,
+                allow_remote=self.allow_remote,
             )
             parsed = parse_vision_json(content, self.settings.labels)
             vision: dict[str, Any] = dict(parsed.get("labels") or {})

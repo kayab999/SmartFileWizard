@@ -2,7 +2,29 @@
 
 All notable product versions. Format: Keep a Changelog (keep it short).
 
-## [Unreleased]
+## [0.11.1] — 2026-11-11
+
+### Remediación F-01…F-18 + A-01…A-06 (ADR-0005) + R8
+
+- Undo como saga recuperable: estado `undo_partial`, causalidad
+  `original_operation_id`, restauración del backup desplazado ANTES del
+  estado final; `filewizard verify` comprueba causalidad y undos
+  incompletos.
+- Movimiento no-sobrescribe (`renameat2(RENAME_NOREPLACE)` + reserva
+  O_EXCL cross-fs); sagas replace con backup persistido antes del rename.
+- Continuidad de identidad percepción→plan→mutación (`stale`, E1/E2/E3).
+- Watcher: observado ≠ procesado (reintento con tope), firma
+  (mtime,size,dev,ino,ctime), aviso destino-dentro-del-árbol.
+- Percepción acotada: límites de bytes/píxeles/carga/respuesta, timeout
+  de tesseract, config con `extra="forbid"` + validadores semánticos.
+- Escrituras atómicas durables (tmp único + fsync) y cola de revisión
+  serializada entre procesos (flock; merge para encoladores).
+- `filewizard displaced`: inventario y purga segura de backups (nunca
+  referenciados); escaneo parcial aborta `--execute` por defecto
+  (`--allow-partial-scan` para anular); MCP `scan` estructurado.
+- Hardening runtime: `watch.lock` con flock, permisos owner-only
+  (journal/cache/cola/log/backups), guardia `allow_remote` en la
+  entrada HTTP, límite de longitud de regex.
 
 ### Added
 
@@ -22,6 +44,14 @@ All notable product versions. Format: Keep a Changelog (keep it short).
 - A match that depends only on OCR, vision, or cascade stays `needs-review` unless a deterministic rule would make the same move, a human review label is present, or the batch override is on.
 - CLI `run`, `undo`, and `watch` write the same rotating `filewizard.log` as the GUI.
 - Primary buttons use `#5B21B6` → `#0369A1` so the label clears WCAG AA.
+
+### Fixed
+
+- CI `test.yml` no longer falls back to `.[dev]` when the `ui` extra fails to
+  install: that fallback turned an install failure into
+  `ModuleNotFoundError` test failures on every matrix runner (observed red
+  on runs #24–25, 2026-10-03). The UI-dependent core test now skips cleanly
+  without PySide6 instead.
 
 ## [0.11.0] — 2026-09-15
 

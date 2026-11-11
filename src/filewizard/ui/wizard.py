@@ -1095,9 +1095,11 @@ class WizardDialog(QDialog):
         error: str,
     ) -> None:
         scan_errors: list[str] = []
+        enqueue_note = ""
         source = None
         if self.worker is not None:
             scan_errors = list(getattr(self.worker, "scan_errors", []))
+            enqueue_note = str(getattr(self.worker, "enqueue_note", "") or "")
             source = getattr(self.worker, "source", None)
             self.worker.deleteLater()
 
@@ -1131,6 +1133,14 @@ class WizardDialog(QDialog):
             from ..review_queue import ReviewQueue
 
             pending = len(ReviewQueue(state_dir=self.state_dir).pending())
+            if enqueue_note:
+                # Non-fatal: the preview is valid, but the review holds
+                # were NOT persisted (F-11 review item).
+                QMessageBox.warning(
+                    self,
+                    "FileWizard",
+                    enqueue_note,
+                )
             if pending:
                 self.status_label.setText(
                     f"Vista previa lista · {pending} en cola de revisión"

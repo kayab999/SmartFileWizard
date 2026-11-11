@@ -273,8 +273,10 @@ def test_retention_review_delete_and_purge(tmp_path: Path) -> None:
     q.add(item2)
     assert q.resolve(item2.id, "factura") is True
     assert q.purge_resolved(older_than_days=36500) == 0
-    # Backdate the resolution, then purge.
+    # Backdate the resolution, then purge. The edit must be persisted:
+    # purge operates on fresh disk state (F-11 transaction semantics).
     q.items[0].resolved_at = "2000-01-01T00:00:00+00:00"
+    q.save()
     assert q.purge_resolved(older_than_days=30) == 1
     with pytest.raises(ValueError):
         q.purge_resolved(older_than_days=-1)

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
 import time
+import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import yaml
 
@@ -94,6 +96,38 @@ def _load_ruleset(cfg: WatchConfig, state_dir: Path) -> RuleSet:
         raise WatchError(str(exc)) from exc
 
 
+def destinations_inside_source(ruleset: RuleSet, source: Path) -> list[str]:
+    """Static move destinations that resolve inside the watched tree.
+
+    WP-C3 (F-15): this is repeated-work risk, not a guaranteed infinite
+    loop — whether a re-observed file matches again depends on the rules
+    (and the debounce). Dynamic template destinations are reported as
+    "may resolve inside"; static ones are resolved and checked.
+    """
+    source = source.expanduser().resolve()
+    warnings: list[str] = []
+    for rule in ruleset.rules:
+        dest = rule.then.move_to
+        if not dest:
+            continue
+        if "{" in dest:
+            warnings.append(
+                f"rule {rule.id}: dynamic destination '{dest}' may "
+                f"resolve inside the watched tree {source}"
+            )
+            continue
+        try:
+            resolved = Path(dest).expanduser().resolve()
+        except OSError:
+            continue  # unresolvable: execution will fail on its own
+        if resolved == source or source in resolved.parents:
+            warnings.append(
+                f"rule {rule.id}: destination '{dest}' is inside the "
+                f"watched tree {source}"
+            )
+    return warnings
+
+
 def watch_once(
     cfg: WatchConfig,
     *,
@@ -134,6 +168,11 @@ def _watch_once_body(
 
     ruleset = _load_ruleset(cfg, state_dir)
 
+    # WP-C3 (F-15): explicit, non-fatal warning when destinations sit
+    # inside the watched tree (repeated work risk, documented).
+    for line in destinations_inside_source(ruleset, cfg.source):
+        logger.warning("watch: %s", line)
+
     try:
         extractors = default_extractors(
             ocr=cfg.ocr,
@@ -163,15 +202,29 @@ def _watch_once_body(
         )
         held = [op for op in operations if op.status == "needs-review"]
         if held:
-            from .review_queue import ReviewQueue
+            from .review_queue import (
+                ReviewQueue,
+                ReviewQueueLockError,
+            )
 
             queue = ReviewQueue(state_dir=state_dir)
             for op in held:
                 queue.add_model_hold(op.source, op.error or "", save=False)
             try:
-                queue.save()
-            except OSError as exc:
+                # WP-D2 (F-11): enqueue commits under the lock with a
+                # merge, so it can never clobber a concurrent writer.
+                queue.merge_new_items()
+            except (ReviewQueueLockError, OSError) as exc:
                 logger.warning("review queue save failed: %s", exc)
+                for op in held:
+                    _record_giveup(
+                        state_dir,
+                        source=cfg.source,
+                        path=op.source,
+                        attempts=0,
+                        last_status="needs-review",
+                        reason=f"enqueue_failed: {exc}",
+                    )
 
         if not cfg.dry_run:
             operations = executor.execute(operations)
@@ -181,20 +234,63 @@ def _watch_once_body(
 
 # --- debounce state ------------------------------------------------------
 
+# Watch-state signature layout (watch_state.json per-source entries).
+# Legacy 2-entry lists [mtime_ns, size] remain readable: missing fields
+# are treated as "unknown" (attempt count 0; dev/ino/ctime unknown makes
+# the signature weaker, never stronger).
+SIG_MTIME = 0
+SIG_SIZE = 1
+SIG_DEV = 2
+SIG_INO = 3
+SIG_CTIME = 4
+SIG_ATTEMPTS = 5
+SIG_FIELDS = 6
 
-def file_signature(path: Path) -> tuple[int, int] | None:
-    """(mtime_ns, size) used to detect changes since the last tick."""
+# WP-C1 (F-04): statuses that mean "the event was processed" (consumed).
+# Anything else (error / stale / failed) is NOT consumed: the file is
+# re-observed next tick with an attempt counter; after
+# MAX_WATCH_ATTEMPTS consecutive failures the signature is consumed
+# with a warning (no infinite retry cycles).
+CONSUMED_STATUSES = frozenset(
+    {"done", "skipped", "noop", "needs-review", "dry-run", "missing",
+     "state_mismatch", "already_restored", "undo_partial"}
+)
+RETRY_STATUSES = frozenset({"error", "stale", "failed"})
+MAX_WATCH_ATTEMPTS = 3
+
+
+def _attempts_of(entry: list[int] | None) -> int:
+    if entry is None or len(entry) <= SIG_ATTEMPTS:
+        return 0
+    return max(0, int(entry[SIG_ATTEMPTS]))
+
+
+def file_signature(path: Path) -> tuple[int, ...] | None:
+    """Change signature for the debounce (WP-C2, F-10).
+
+    (mtime_ns, size, dev, ino, ctime_ns). ``st_dev``/``st_ino`` catch
+    same-name substitutions on the same filesystem; ``ctime_ns`` catches
+    in-place rewrites that preserve size and mtime (ctime cannot be set
+    from userspace on Linux). Their semantics are platform-specific —
+    they are change *detection* signals, never content identity.
+    """
     try:
         st = path.stat()
     except OSError:
         return None
-    return (st.st_mtime_ns, st.st_size)
+    return (
+        st.st_mtime_ns,
+        st.st_size,
+        getattr(st, "st_dev", 0),
+        getattr(st, "st_ino", 0),
+        getattr(st, "st_ctime_ns", 0),
+    )
 
 
-def snapshot(source: Path) -> dict[Path, tuple[int, int]]:
+def snapshot(source: Path) -> dict[Path, tuple[int, ...]]:
     """Map of regular files under `source` to their change signature."""
     source = source.expanduser().resolve()
-    result: dict[Path, tuple[int, int]] = {}
+    result: dict[Path, tuple[int, ...]] = {}
     for path in iter_files(source):
         sig = file_signature(path)
         if sig is not None:
@@ -227,16 +323,135 @@ def _save_state(
     )
 
 
+def _giveups_path(state_dir: Path) -> Path:
+    return state_dir / "watch_giveups.jsonl"
+
+
+def _giveups_error_path(state_dir: Path) -> Path:
+    return state_dir / "watch_giveups.error.json"
+
+
+def read_giveup_error(state_dir: Path) -> dict[str, Any] | None:
+    """Observable persistent error when the JSONL surface itself fails."""
+    try:
+        value = json.loads(_giveups_error_path(state_dir).read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else None
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _record_giveup(
+    state_dir: Path,
+    *,
+    source: Path,
+    path: Path,
+    attempts: int,
+    last_status: str | None,
+    reason: str,
+) -> bool:
+    """Append one give-up / enqueue-failure event as a JSONL line.
+
+    R4: a queryable operator surface independent of the rotating log.
+    Append (fsynced) so a crash between events cannot lose prior records;
+    each line is a self-contained JSON object.
+    """
+    import json as _json
+    import os as _os
+
+    from datetime import datetime, timezone
+
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "source": str(source),
+        "path": str(path),
+        "attempts": int(attempts),
+        "last_status": last_status,
+        "reason": reason,
+    }
+    path_out = _giveups_path(state_dir)
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        with path_out.open("a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(record, ensure_ascii=False) + "\n")
+            fh.flush()
+            try:
+                _os.fsync(fh.fileno())
+            except OSError:
+                pass
+    except OSError as exc:
+        # R8.8: recording failure is itself an observable persistent state,
+        # not merely a debug trace. The next giveup CLI read surfaces it.
+        logger.error("watch giveup persistence failed for %s: %s", path, exc)
+        try:
+            atomic_write_text(
+                _giveups_error_path(state_dir),
+                _json.dumps({"record": record, "error": str(exc)}, ensure_ascii=False),
+            )
+        except OSError:
+            logger.error("watch giveup error state could not be persisted")
+        return False
+    from .persist import ensure_private_file
+
+    ensure_private_file(path_out)
+    return True
+
+
+def read_giveups(state_dir: Path) -> list[dict[str, Any]]:
+    """Read all give-up events (oldest first)."""
+    import json as _json
+
+    path = _giveups_path(state_dir)
+    out: list[dict[str, Any]] = []
+    if not path.is_file():
+        return out
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            item = _json.loads(raw)
+        except (ValueError, _json.JSONDecodeError):
+            continue
+        if isinstance(item, dict):
+            out.append(item)
+    return out
+
+
+def clear_giveups(state_dir: Path) -> None:
+    for path in (_giveups_path(state_dir), _giveups_error_path(state_dir)):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def changed_paths(
     prev: dict[str, list[int]],
-    current: dict[Path, tuple[int, int]],
+    current: dict[Path, tuple[int, ...]],
 ) -> list[Path]:
-    """Paths present/updated since the previous tick (new or signature changed)."""
+    """Paths present/updated since the previous tick (new or signature changed).
+
+    Legacy 2-entry lists compare on (mtime, size) only; newer entries
+    also compare dev/ino/ctime when present.
+    """
     changed: list[Path] = []
     for path, sig in current.items():
         key = str(path)
         old = prev.get(key)
-        if old is None or old[0] != sig[0] or old[1] != sig[1]:
+        if old is None:
+            changed.append(path)
+            continue
+        changed_sig = False
+        for idx in range(min(len(sig), len(old))):
+            if old[idx] != sig[idx]:
+                changed_sig = True
+                break
+        if changed_sig:
+            changed.append(path)
+            continue
+        # WP-C1: an unconsumed failure is re-observed next tick.
+        attempts = _attempts_of(old)
+        if 0 < attempts < MAX_WATCH_ATTEMPTS:
             changed.append(path)
     return changed
 
@@ -259,8 +474,14 @@ def _pid_alive(pid: int) -> bool:
 @contextmanager
 def watcher_lock(state_dir: Path) -> Iterator[Path]:
     """
-    Exclusive watcher pid lock: prevents two `watch` processes on the same
-    state_dir. Stale locks (dead pid or unreadable) are reclaimed.
+    Exclusive watcher lock (E1): ``flock`` on ``watch.lock`` + pid/token
+    diagnostics.
+
+    The exclusion primitive is the flock: the kernel releases it when
+    the holder dies, so a crashed watcher can never wedge the lock and
+    pid reuse cannot make a dead lock look alive (pid + ``kill(pid, 0)``
+    alone is not a robust identity). The pid and a random token in the
+    file are diagnostics only.
 
     Raises WatcherLockError if another live watcher holds the lock.
     """
@@ -268,38 +489,47 @@ def watcher_lock(state_dir: Path) -> Iterator[Path]:
     state_dir.mkdir(parents=True, exist_ok=True)
     lock_path = state_dir / "watch.lock"
 
-    fd: int | None = None
-    for _ in range(2):
+    fd = os.open(
+        lock_path, os.O_CREAT | os.O_RDWR, 0o600
+    )
+    try:
         try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            break
-        except FileExistsError:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            other = -1
             try:
-                other = int(lock_path.read_text(encoding="utf-8").strip())
+                other = int(
+                    lock_path.read_text(encoding="utf-8").strip() or -1
+                )
             except (OSError, ValueError):
-                other = -1
-            if other > 0 and _pid_alive(other):
-                raise WatcherLockError(
-                    f"Another watcher is already running (pid {other}, "
-                    f"lock {lock_path})."
-                ) from None
-            lock_path.unlink(missing_ok=True)
-    else:  # pragma: no cover - loop can only exit via break
-        raise WatcherLockError(f"Cannot acquire lock {lock_path}.")
-
-    assert fd is not None
-    try:
-        os.write(fd, str(os.getpid()).encode("ascii"))
-    finally:
-        os.close(fd)
-
-    try:
-        yield lock_path
-    finally:
+                pass
+            raise WatcherLockError(
+                f"Another watcher is already running (pid {other}, "
+                f"lock {lock_path})."
+            ) from exc
+        # Truncate + record owner identity (diagnostics, not the lock).
         try:
-            lock_path.unlink(missing_ok=True)
+            os.ftruncate(fd, 0)
+            token = uuid.uuid4().hex
+            os.write(
+                fd,
+                f"{os.getpid()} {token}".encode("ascii"),
+            )
         except OSError:
             pass
+
+        try:
+            yield lock_path
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        os.close(fd)
+        # Removing the file is only cosmetic; the flock, not its absence,
+        # is the lock. Removing it while a waiter holds a flock on the
+        # same inode is avoided by leaving the file in place.
 
 
 # --- polling loop -----------------------------------------------------------
@@ -352,9 +582,47 @@ def watch_loop(
                     acquire_lock=False,
                 )
 
-            sources[source_key] = {
-                str(p): [sig[0], sig[1]] for p, sig in current.items()
-            }
+            # WP-C1 (F-04): observed is not processed. Only statuses in
+            # CONSUMED_STATUSES record the signature cleanly; a failed
+            # attempt keeps the file observable and counts an attempt,
+            # capped at MAX_WATCH_ATTEMPTS to avoid infinite retries.
+            op_status: dict[str, str] = {}
+            for op in ops:
+                op_status[str(op.source)] = op.status
+
+            new_prev: dict[str, list[int]] = {}
+            for path, sig in current.items():
+                key = str(path)
+                old = prev.get(key)
+                # Reset attempts only on a genuinely new signature; a
+                # forced retry re-observation (same signature) keeps
+                # counting (WP-C1).
+                sig_changed = old is None or any(
+                    old[i] != sig[i] for i in range(min(len(sig), len(old)))
+                )
+                attempts = 0 if sig_changed else _attempts_of(old)
+                status = op_status.get(key)
+                if status in RETRY_STATUSES:
+                    attempts += 1
+                    if attempts >= MAX_WATCH_ATTEMPTS:
+                        logger.warning(
+                            "watch: giving up on %s after %d failed "
+                            "attempts (last status: %s)",
+                            key,
+                            attempts,
+                            status,
+                        )
+                        _record_giveup(
+                            state_dir,
+                            source=source,
+                            path=Path(key),
+                            attempts=attempts,
+                            last_status=status,
+                            reason="max_attempts_exhausted",
+                        )
+                entry: list[int] = list(sig) + [attempts]
+                new_prev[key] = entry
+            sources[source_key] = new_prev
             _save_state(state_path, sources)
             prev = sources[source_key]
 

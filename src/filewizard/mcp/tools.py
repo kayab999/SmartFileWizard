@@ -9,6 +9,7 @@ WP-0.7.2 scope: read-only tools only. None of these mutate the filesystem
 
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -103,8 +104,13 @@ def mcp_allowed_roots(state_dir: Path | str | None = None) -> list[Path]:
     for part in raw_paths:
         try:
             resolved = Path(part).expanduser().resolve()
-        except OSError:
-            continue
+        except (OSError, RuntimeError) as exc:
+            # A-03 / F-08: a configured root that cannot be resolved is
+            # never silently dropped — the jail must not shrink without
+            # an explicit diagnosis. Fail closed: no writes until fixed.
+            raise McpJailError(
+                f"allowed_root cannot be resolved ({part}): {exc}"
+            ) from exc
         if str(resolved) not in seen:
             seen.add(str(resolved))
             out.append(resolved)
@@ -173,6 +179,9 @@ def _apply_destination_jail(
 
     Plan: agent sees the op as failed. Execute: Executor skips non-planned
     ops, so marked ops never move. Only applies when roots are configured.
+
+    Fail-closed (F-08/A-03): a destination that cannot be resolved is an
+    error, never a `continue` into an unvalidated execution.
     """
     if not roots:
         return
@@ -181,7 +190,9 @@ def _apply_destination_jail(
             continue
         try:
             dest = op.destination.expanduser().resolve()
-        except OSError:
+        except (OSError, RuntimeError) as exc:
+            op.status = "error"
+            op.error = f"destination cannot be resolved for jail check: {exc}"
             continue
         if not _path_within(dest, roots):
             op.status = "error"
@@ -488,6 +499,11 @@ def filewizard_plan(
         "rules": str(rules) if rules else None,
         "limit": lim,
         "perception_profile": perception_profile,
+        "scan": {
+            "complete": not scan_errors,
+            "scanned": scanned,
+            "errors": scan_errors,
+        },
         "scanned": scanned,
         "warnings": _remote_warnings(state, perception_profile),
         "scan_errors": scan_errors,
@@ -507,10 +523,15 @@ def filewizard_execute(
     enable_vision: bool = False,
     agent_features: Path | dict[str, dict] | None = None,
     allow_model_only: bool = False,
+    allow_partial_scan: bool = False,
 ) -> dict:
     """Execute a plan. Requires confirm=True; otherwise a structured error.
 
     Reuses Executor + Journal (same journal as CLI). Returns batch_id for undo.
+
+    WP-D5 (F-14): when the scan is incomplete the run aborts before any
+    move unless ``allow_partial_scan=True`` — a destructive batch must
+    not silently skip files the agent could not see.
     """
     if confirm is not True:
         return result_error(
@@ -548,7 +569,11 @@ def filewizard_execute(
         )
 
         with Journal(db) as journal:
+            # Idempotent (ADR-0005 I3): reconcile rows a previous run left
+            # pending before attributing or adding anything.
+            journal.reconcile_pending()
             executor = Executor(journal=journal, dry_run=False)
+            scan_errors: list[str] = []
             operations, scanned = plan_operations(
                 source=src,
                 rules=ruleset,
@@ -556,12 +581,37 @@ def filewizard_execute(
                 extractors=extractors,
                 limit=lim,
                 allow_model_only=allow_model_only,
+                scan_errors=scan_errors,
             )
+            scan_complete = not scan_errors
+            # WP-D5 (F-14): fail closed on a partial scan — before any
+            # move, with the offending paths in the error for diagnosis.
+            if not scan_complete and not allow_partial_scan:
+                preview = "; ".join(scan_errors[:5])
+                more = (
+                    f" (+{len(scan_errors) - 5} more)"
+                    if len(scan_errors) > 5
+                    else ""
+                )
+                return result_error(
+                    "filewizard_execute",
+                    f"Scan incomplete ({len(scan_errors)} path error(s)); "
+                    f"refusing to execute. First errors: {preview}{more} "
+                    "Pass allow_partial_scan=True to override.",
+                )
             # Jail destinations before any move; marked ops are skipped.
             _apply_destination_jail(operations, roots)
-            results = executor.execute(operations)
-            latest = journal.recent_batches(limit=1)
-            batch_id = latest[0]["batch_id"] if latest else None
+            # ADR-0005: the request owns its batch id. It is generated here
+            # and returned verbatim; when no row is journaled (empty plan,
+            # all rejected/noop/stale) the id does not exist in the journal
+            # and the response reports null instead of borrowing a previous
+            # batch via a global lookup.
+            request_batch_id = uuid.uuid4().hex
+            results = executor.execute(
+                operations, batch_id=request_batch_id
+            )
+            journaled = journal.operations_for_batch(request_batch_id)
+            batch_id = request_batch_id if journaled else None
     except Exception as exc:
         return result_error("filewizard_execute", str(exc))
 
@@ -576,6 +626,11 @@ def filewizard_execute(
         "preset": preset,
         "rules": str(rules) if rules else None,
         "limit": lim,
+        "scan": {
+            "complete": scan_complete,
+            "scanned": scanned,
+            "errors": scan_errors,
+        },
         "scanned": scanned,
         "batch_id": batch_id,
         "journal_path": str(db),
@@ -629,6 +684,7 @@ def filewizard_undo_batch(
             return result_error("filewizard_undo_batch", str(exc))
 
         with Journal(db) as journal:
+            journal.reconcile_pending()
             rows = journal.done_moves_for_batch(batch_id)
             if roots:
                 for row in rows:

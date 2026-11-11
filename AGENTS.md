@@ -3,7 +3,7 @@
 **Purpose:** Give any human developer or coding agent enough context to continue work safely without rediscovering the project from scratch.
 
 **Last updated:** 2026-09-15  
-**Product version:** `0.11.0`  
+**Product version:** `0.11.1`  
 **Workspace:** `/home/carlos/file wizard`
 
 ### Dual-agent workflow (read this)
@@ -67,8 +67,9 @@ FileWizard is a **local-first, rule-based file classification and organization e
 | MCP server for agents | **Done 0.7–0.9** | 9 tools; plan/execute use `default_extractors` (0.8); writes require `allowed_roots` or `FILEWIZARD_SOURCE_ROOT` |
 | Extra backends (4B, NPU, …) | **Backlog 0.5+** | Same contract; catalog documents ids only |
 | Daemon / folder watch | **Done 0.6.0** | Polling loop; inotify nativo fuera de scope |
-| Packaging (Flatpak/AppImage) | **Partial 0.11** | `.desktop` + hicolor icon; Flatpak/AppImage not started |
+| Packaging (AppImage/.deb) | **Done 0.11** | `packaging/appimage/` + `packaging/deb/` + `nfpm.yaml` + `release.yml` builds+smokes; Flatpak not started |
 | Automated GUI tests | **Not started** | Unit tests cover options/core |
+| Integrity remediation (F-01…F-18) | **In progress** | WPs A/B/C/D/E in WORK_PLAN; ADR-0005 transactional states |
 
 ### 2.2 Version history
 
@@ -106,7 +107,8 @@ FileWizard is a **local-first, rule-based file classification and organization e
 0.8   UX + calidad (AUDIT_0.8.md) → SHIPPED 0.8.0
 0.9   Runtime hardening (AUDIT_0.9.md) → SHIPPED 0.9.0
 0.10  Remediación integral + afilado → SHIPPED 0.10.0 / 0.10.1
-0.11  Downloads-docs + cola→labels + desktop → SHIPPED 0.11.0
+0.11  Downloads-docs + cola→labels + desktop + AppImage/.deb → SHIPPED 0.11.0
+0.11+ Integrity remediation (F-01…F-18): WPs A/B/C/D/E, no release until gates pass
 0.12  Extra backends / daemon / Flatpak
 ```
 
@@ -124,7 +126,7 @@ filewizard --help
 # GUI (needs display): filewizard-ui
 ```
 
-Expect **224** unit tests passing (as of 0.11.0).
+Expect **385** unit tests passing (post-remediation F-01…F-18 + A-01…A-06 baseline; see WORK_PLAN remediation table).
 
 ---
 
@@ -186,7 +188,12 @@ Path
 | Presets | `src/filewizard/presets.py` | RuleSet library under state_dir |
 | Review queue | `src/filewizard/review_queue.py` | JSON store for manual classification |
 | Cancel | `src/filewizard/cancel.py` | `CancelToken` cooperative cancel |
-| CLI | `src/filewizard/cli.py` | `run`, `undo`, `ui`, `presets`, `perception`, `watch` (once/list/add/remove/run) |
+| Identity | `src/filewizard/identity.py` | `FileIdentity` (size/mtime/dev/ino, SHA-256 ≤64MiB); `identity_matches`, `content_matches`, `pid_alive` |
+| Model gate | `src/filewizard/model_gate.py` | Holds model-only matches as `needs-review` unless allowed |
+| Plan brief | `src/filewizard/plan_brief.py` | One-text plan statement (source, volume, checks) for GUI/CLI |
+| Verify batch | `src/filewizard/verify_batch.py` | Read-only journal↔filesystem comparison (`filewizard verify`) |
+| Log setup | `src/filewizard/logsetup.py` | Rotating GUI/CLI log |
+| CLI | `src/filewizard/cli.py` | `run`, `undo`, `ui`, `presets`, `perception`, `watch` (once/list/add/remove/run), `verify`, `reset` |
 | Watcher | `src/filewizard/watch.py` | `WatchConfig`, `watch_once`, `watch_loop`, debounce `watch_state.json`, pid lock, active watches |
 | Atomic persist | `src/filewizard/persist.py` | `atomic_write_text` (tmp + replace) for JSON/YAML state |
 | Heuristics | `src/filewizard/plugins/heuristics.py` | EXIF, patterns, palette |
@@ -201,11 +208,18 @@ Path
 | Snapshot | `perception/snapshot.py` | Compact journal evidence |
 | HTTP | `perception/http_openai.py` | OpenAI-compatible client + probe |
 | Extractors | `perception/extractors.py` | Tesseract / llama_http OCR & vision |
+| Inject | `perception/inject.py` | Agent label injection (cascade shape) |
+| Prompts | `perception/prompts.py` | OCR/vision prompt texts |
+| Catalog | `perception/catalog.py` | Model catalog for `perception models` |
 | **UI** | | |
 | App / home | `ui/app.py`, `ui/main_window.py` | Entry, splash, QSS, intents, journal cards, review badge |
 | Theme / tray | `ui/theme.py`, `ui/style.qss`, `ui/tray.py`, `ui/assets/` | Dark palette, splash/icon, tray idle/active/alert |
 | Wizard | `ui/wizard.py` | Pages + preview/apply |
 | Workers | `ui/workers.py` | Preview (enqueues review), Execute, Undo |
+| Options | `ui/options.py`, `ui/intents.py` | Rule builders + intent→options mapping |
+| Support | `ui/support.py`, `ui/util.py`, `ui/widgets.py` | Shared helpers, widgets |
+| Single instance | `ui/single_instance.py` | GUI single-instance guard |
+| Entry | `ui/__main__.py` | `filewizard-ui` entrypoint |
 | Settings | `ui/settings_dialog.py` | Perception / cascade / cache / catalog |
 | Review UI | `ui/review_dialog.py` | Manual queue, thumbnail, export JSON |
 | Preview | `ui/preview_dialog.py` | Per-file detail + cascade evidence |
@@ -321,7 +335,7 @@ MainWindow
 
 | Layer | Required | Optional |
 |-------|----------|----------|
-| Core | click, pydantic, PyYAML | pillow, pytesseract |
+| Core | click, pydantic, PyYAML, httpx | pillow, pytesseract |
 | Zero-shot | — | torch, transformers, pillow (`[zeroshot]`) |
 | UI | — | PySide6 |
 | MCP | — | `mcp` SDK (`[mcp]`) |
@@ -408,8 +422,19 @@ filewizard-ui
 | `tests/test_watch.py` | `watch_once`/loop, debounce, pid lock, active watches, once-lock |
 | `tests/test_runtime_09.py` | HTTP lock, GUI log, WAL, cache cap, close guards |
 | `tests/test_mcp_roots_09.py` | MCP allowed_roots jail, env override, CLI pending warn |
-| `tests/test_runtime_09.py` | HTTP lock, GUI log, WAL, cache cap, close guards |
-| `tests/test_mcp_roots_09.py` | MCP allowed_roots jail, env override, CLI pending warn |
+| `tests/test_mcp*.py` | MCP read/mutate/agent payloads, jail parity |
+| `tests/test_integrity.py` | Identity capture, stale checks, reconcile promotion |
+| `tests/test_safety_lifecycle.py` | Startup reconcile of pending rows, lifecycle guards |
+| `tests/test_verify_batch.py` | `filewizard verify` report logic |
+| `tests/test_plan_brief.py` | One-text plan statement |
+| `tests/test_agent_inject.py` | `--agent-features` normalization + hold |
+| `tests/test_catalog.py` | `perception models` catalog |
+| `tests/test_conditions_11.py` | `older_than_days`, aspect predicates |
+| `tests/test_downloads_11.py` | `downloads-docs` preset |
+| `tests/test_review_labels_11.py` | Resolved labels → next plan inject |
+| `tests/test_desktop_11.py` | `.desktop` file sanity |
+| `tests/test_remediation_08.py` / `test_remediation_098.py` / `test_sharpen_09.py` | 0.8/0.9 remediation regressions |
+| `tests/test_ui_theme.py` | QSS/theme tokens (no display) |
 
 ---
 
@@ -422,8 +447,9 @@ filewizard-ui
 | **AGENTS.md** (this file) | Handover, architecture, status for all agents |
 | [docs/ROLES.md](docs/ROLES.md) | Architect vs implementer split |
 | [docs/IMPLEMENTER_BRIEF.md](docs/IMPLEMENTER_BRIEF.md) | **OpenCode/DeepSeek entry** |
-| [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Work packages 0.5–0.10 shipped |
+| [docs/WORK_PLAN.md](docs/WORK_PLAN.md) | Work packages 0.5–0.11 + remediation WPs |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [OPENCODE.md](OPENCODE.md) | OpenCode agent entrypoint |
 | [docs/RELEASE.md](docs/RELEASE.md) | release checklist |
 | [docs/DEFINITION_OF_DONE.md](docs/DEFINITION_OF_DONE.md) | WP + release checklist |
 | [docs/BACKLOG_NOTES.md](docs/BACKLOG_NOTES.md) | Out-of-scope notes from implementer |
@@ -431,11 +457,13 @@ filewizard-ui
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Product milestones (next 0.10+) |
 | [docs/AUDIT_0.8.md](docs/AUDIT_0.8.md) | 0.8 findings (remediated) |
 | [docs/AUDIT_0.9.md](docs/AUDIT_0.9.md) | 0.9 runtime findings (remediated) |
+| [docs/AUDIT_REMEDIATION_0.11.1.md](docs/AUDIT_REMEDIATION_0.11.1.md) | F-01…F-18 + A-01…A-06 remediation report |
 | [docs/PLAN_CASCADE.md](docs/PLAN_CASCADE.md) | Cascade design + status |
 | [docs/PLAN_PERCEPTION_PROVIDERS.md](docs/PLAN_PERCEPTION_PROVIDERS.md) | Provider contract |
 | [docs/ROBUSTNESS.md](docs/ROBUSTNESS.md) | R1–R15 |
 | `perception.example.yaml` | Config template |
-| `rules.example.yaml` / `rules_sharp.yaml` | Sample rules |
+| `rules.example.yaml` / `rules_sharp.yaml` / `rules_downloads.example.yaml` / `rules_cascade_ml.example.yaml` | Sample rules |
+| `packaging/` | `.desktop`, AppImage (`appimage/`), `.deb` (`nfpm.yaml`, `deb/`) |
 
 ---
 

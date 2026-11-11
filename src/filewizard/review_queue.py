@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
+import threading
+import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .persist import atomic_write_text
 
 logger = logging.getLogger(__name__)
+
+# WP-D2 (F-11): how long an enqueue/mutation waits for the queue lock
+# before failing explicitly. Long enough for a concurrent writer to
+# finish; short enough that a wedged holder cannot freeze the GUI.
+QUEUE_LOCK_TIMEOUT_S = 10.0
+QUEUE_LOCK_POLL_S = 0.05
+
+
+class ReviewQueueLockError(RuntimeError):
+    """The queue lock could not be acquired within the timeout."""
 
 
 def review_badge_label(queue: ReviewQueue) -> str:
@@ -76,28 +90,83 @@ class ReviewQueue:
         self.path = path or default_queue_path(state_dir)
         self.items: list[ReviewItem] = []
         self.load_error: str | None = None
+        # Re-entrancy guard per thread: save() inside a transaction must
+        # not try to re-acquire the flock (flock locks are per open file
+        # description; a second fd in the same process would deadlock).
+        self._tls = threading.local()
+        # ids present at the last load: the basis for merge_new_items().
+        self._loaded_ids: set[str] = set()
         self.load()
 
-    def load(self) -> None:
-        self.load_error = None
-        if not self.path.is_file():
-            self.items = []
-            return
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            self.items = [ReviewItem(**row) for row in raw.get("items", [])]
-        except Exception as exc:
-            logger.warning("Review queue unreadable (%s): %s", self.path, exc)
-            bak = self.path.with_name(self.path.name + ".bak")
-            try:
-                self.path.replace(bak)
-                logger.warning("Corrupt queue moved to %s", bak)
-            except OSError as move_exc:
-                logger.warning("Could not quarantine corrupt queue: %s", move_exc)
-            self.items = []
-            self.load_error = str(exc)
+    # --- locking (WP-D2, F-11) ---------------------------------------------
 
-    def save(self) -> None:
+    @property
+    def lock_path(self) -> Path:
+        return self.path.with_name(self.path.name + ".lock")
+
+    @contextmanager
+    def _locked(self, timeout: float = QUEUE_LOCK_TIMEOUT_S) -> Iterator[Any]:
+        """Exclusive inter-process lock on ``<queue>.lock`` (flock).
+
+        Fails with ReviewQueueLockError after ``timeout`` instead of
+        hanging a GUI thread forever.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(self.lock_path, "a+")
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise ReviewQueueLockError(
+                            f"review queue busy for over {timeout:.0f}s: "
+                            f"{self.lock_path}"
+                        ) from None
+                    time.sleep(QUEUE_LOCK_POLL_S)
+            yield fh
+        finally:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            fh.close()
+
+    @contextmanager
+    def transaction(
+        self,
+        *,
+        reload: bool = True,
+        save: bool = True,
+        timeout: float = QUEUE_LOCK_TIMEOUT_S,
+    ) -> Iterator["ReviewQueue"]:
+        """Serialize load → mutate → save against other processes (F-11).
+
+        Entry: acquire the lock, then (optionally) re-read the file so the
+        mutation applies to the latest on-disk state, not a stale copy.
+        Exit: persist — unless ``save=False`` (the caller saves explicitly
+        inside the lock) or the body raised.
+
+        ``reload`` replaces ``self.items`` with the fresh disk state;
+        management mutators (resolve/delete/clear) are authoritative and
+        use it; enqueue-only writers use ``merge_new_items`` instead so
+        they never drop concurrent entries.
+        """
+        depth = getattr(self._tls, "depth", 0)
+        with self._locked(timeout):
+            self._tls.depth = depth + 1
+            try:
+                if reload:
+                    self.load()
+                yield self
+                if save:
+                    self._save_locked()
+            finally:
+                self._tls.depth = depth
+
+    def _save_locked(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": 1,
@@ -108,6 +177,67 @@ class ReviewQueue:
             self.path,
             json.dumps(payload, ensure_ascii=False, indent=2),
         )
+
+    def merge_new_items(self) -> int:
+        """Commit in-memory additions without clobbering other writers.
+
+        Reloads the disk state under the lock and appends only the items
+        created since this object last loaded (unknown ids, not already
+        covered by an unresolved path entry on disk). Concurrent adds,
+        resolutions and deletions by other processes are preserved; this
+        method never removes anything.
+        """
+        additions = [
+            item for item in self.items if item.id not in self._loaded_ids
+        ]
+        added = 0
+        with self.transaction(reload=True, save=False):
+            known_ids = {item.id for item in self.items}
+            for item in additions:
+                if item.id in known_ids:
+                    continue
+                if any(
+                    existing.path == item.path and not existing.resolved
+                    for existing in self.items
+                ):
+                    continue  # disk already holds an unresolved entry
+                self.items.append(item)
+                known_ids.add(item.id)
+                added += 1
+            if added:
+                self._save_locked()
+        self._loaded_ids = {item.id for item in self.items}
+        return added
+
+    def load(self) -> None:
+        self.load_error = None
+        if not self.path.is_file():
+            self.items = []
+            self._loaded_ids = set()
+            return
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            self.items = [ReviewItem(**row) for row in raw.get("items", [])]
+            self._loaded_ids = {item.id for item in self.items}
+        except Exception as exc:
+            logger.warning("Review queue unreadable (%s): %s", self.path, exc)
+            bak = self.path.with_name(self.path.name + ".bak")
+            try:
+                self.path.replace(bak)
+                logger.warning("Corrupt queue moved to %s", bak)
+            except OSError as move_exc:
+                logger.warning("Could not quarantine corrupt queue: %s", move_exc)
+            self.items = []
+            self._loaded_ids = set()
+            self.load_error = str(exc)
+
+    def save(self) -> None:
+        """Persist the queue (inter-process serialized)."""
+        if getattr(self._tls, "depth", 0) > 0:
+            self._save_locked()
+            return
+        with self._locked():
+            self._save_locked()
 
     def pending(self) -> list[ReviewItem]:
         return [i for i in self.items if not i.resolved]
@@ -130,7 +260,20 @@ class ReviewQueue:
         self, item: ReviewItem, *, dedupe_path: bool = True, save: bool = True
     ) -> None:
         """Append (or refresh) an item. Pass save=False to batch many adds
-        and call save() once (I6: avoids O(U·Q) full rewrites per file)."""
+        and call merge_new_items()/save() once (I6: avoids O(U·Q) full
+        rewrites per file).
+
+        With save=True the whole add is serialized against other
+        processes on fresh disk state (F-11): the dedupe check cannot
+        miss an entry another process just wrote.
+        """
+        if not save:
+            self._add_in_memory(item, dedupe_path=dedupe_path)
+            return
+        with self.transaction(reload=True):
+            self._add_in_memory(item, dedupe_path=dedupe_path)
+
+    def _add_in_memory(self, item: ReviewItem, *, dedupe_path: bool) -> None:
         if dedupe_path:
             for existing in self.items:
                 if existing.path == item.path and not existing.resolved:
@@ -140,12 +283,8 @@ class ReviewQueue:
                     existing.status = item.status
                     existing.stage_used = item.stage_used
                     existing.reason = item.reason
-                    if save:
-                        self.save()
                     return
         self.items.append(item)
-        if save:
-            self.save()
 
     def add_from_features(
         self,
@@ -174,45 +313,54 @@ class ReviewQueue:
         return item
 
     def resolve(self, item_id: str, category: str) -> bool:
-        for item in self.items:
-            if item.id == item_id:
-                item.resolved = True
-                item.resolved_category = category
-                item.resolved_at = datetime.now(timezone.utc).isoformat()
-                # I5: human confirmation is certain evidence — min_confidence
-                # rules must not reject it for a stale low score.
-                previous_confidence = item.confidence
-                item.confidence = 1.0
-                try:
-                    self.persist_resolved_labels()
-                except OSError as exc:
-                    item.resolved = False
-                    item.resolved_category = None
-                    item.resolved_at = None
-                    item.confidence = previous_confidence
-                    logger.warning("review_labels.json not written: %s", exc)
-                    return False
-                self.save()
-                return True
+        """Resolve on fresh disk state, serialized (F-11).
+
+        The labels export is written inside the same lock so the labels
+        file and the queue can never disagree about the resolution.
+        """
+        with self.transaction(reload=True, save=False):
+            for item in self.items:
+                if item.id == item_id:
+                    item.resolved = True
+                    item.resolved_category = category
+                    item.resolved_at = datetime.now(timezone.utc).isoformat()
+                    # I5: human confirmation is certain evidence —
+                    # min_confidence rules must not reject it for a stale
+                    # low score.
+                    previous_confidence = item.confidence
+                    item.confidence = 1.0
+                    try:
+                        self.persist_resolved_labels()
+                    except OSError as exc:
+                        item.resolved = False
+                        item.resolved_category = None
+                        item.resolved_at = None
+                        item.confidence = previous_confidence
+                        logger.warning("review_labels.json not written: %s", exc)
+                        return False
+                    self._save_locked()
+                    return True
         return False
 
     def dismiss(self, item_id: str) -> bool:
         return self.resolve(item_id, "dismissed")
 
     def clear_resolved(self) -> int:
-        before = len(self.items)
-        self.items = [i for i in self.items if not i.resolved]
-        self.save()
-        return before - len(self.items)
+        removed = 0
+        with self.transaction(reload=True):
+            before = len(self.items)
+            self.items = [i for i in self.items if not i.resolved]
+            removed = before - len(self.items)
+        return removed
 
     def delete(self, item_id: str) -> bool:
-        """Hard-delete one item (pending or resolved)."""
-        before = len(self.items)
-        self.items = [i for i in self.items if i.id != item_id]
-        if len(self.items) == before:
-            return False
-        self.save()
-        return True
+        """Hard-delete one item (pending or resolved), serialized (F-11)."""
+        deleted = False
+        with self.transaction(reload=True):
+            before = len(self.items)
+            self.items = [i for i in self.items if i.id != item_id]
+            deleted = len(self.items) != before
+        return deleted
 
     def purge_resolved(self, *, older_than_days: int = 90) -> int:
         """Delete resolved items older than the cutoff (retention, Fase 3)."""
@@ -221,15 +369,15 @@ class ReviewQueue:
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=older_than_days)
         ).isoformat()
-        before = len(self.items)
-        self.items = [
-            i
-            for i in self.items
-            if not (i.resolved and (i.resolved_at or "") < cutoff)
-        ]
-        removed = before - len(self.items)
-        if removed:
-            self.save()
+        removed = 0
+        with self.transaction(reload=True):
+            before = len(self.items)
+            self.items = [
+                i
+                for i in self.items
+                if not (i.resolved and (i.resolved_at or "") < cutoff)
+            ]
+            removed = before - len(self.items)
         return removed
 
     def persist_resolved_labels(self) -> Path:

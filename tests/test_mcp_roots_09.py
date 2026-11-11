@@ -214,3 +214,45 @@ def test_corrupt_mcp_yaml_fails_closed(jail_home: Path, monkeypatch) -> None:
     plan = filewizard_plan(src, jail_home, rules=rules)
     assert plan["ok"] is False
     assert "mcp.yaml" in plan["error"]
+
+
+def test_symlink_destination_resolves_outside_jail_refused(
+    jail_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R3.4: a destination that is a symlink to outside allowed_roots is
+    followed by the jail check and refused (fail-closed). A concurrent
+    substitution between plan and execute is caught by the re-check at
+    the execute boundary; a swap during the move itself is a platform
+    limitation documented in ADR-0005 (O_NOFOLLOW), not a silent pass.
+    """
+    tmp_path = jail_home
+    from filewizard.mcp.tools import filewizard_plan
+
+    monkeypatch.delenv("FILEWIZARD_SOURCE_ROOT", raising=False)
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.txt").write_text("x", encoding="utf-8")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    link = tmp_path / "linkdest"
+    link.symlink_to(victim)
+    rules = tmp_path / "rules.yaml"
+    _rules(rules, link)
+    (tmp_path / "mcp.yaml").write_text(
+        __import__("yaml").safe_dump(
+            {"allowed_roots": [str(src), str(tmp_path / "allowed")]},
+        ),
+        encoding="utf-8",
+    )
+    plan = filewizard_plan(src, tmp_path, rules=rules)
+    # Either the whole plan errors or the op is marked error with
+    # allowed_roots in its error message.
+    if plan.get("ok"):
+        ops = plan.get("operations", [])
+        assert ops and any(
+            op.get("status") == "error"
+            and "allowed_roots" in (op.get("error") or "")
+            for op in ops
+        )
+    else:
+        assert "allowed_roots" in plan.get("error", "")

@@ -10,6 +10,7 @@ from .cancel import CancelToken, CancelledError
 from .engine import Engine
 from .executor import Executor, PlannedOperation
 from .facts import FeatureExtractor, collect_facts
+from .identity import capture_identity
 from .models import Rule, RuleSet
 from .scanner import iter_files
 
@@ -191,6 +192,13 @@ def plan_operations(
         if on_progress is not None:
             on_progress(scanned, limit)
 
+        # WP-B1 (F-07): capture the file identity BEFORE any extractor
+        # runs. Perception (OCR/vision/HTTP) can take long; a substitution
+        # during that window would otherwise let a decision built on the
+        # original's evidence move the substitute. executor.plan compares
+        # this against a fresh capture and refuses to plan on divergence.
+        identity_pre = capture_identity(path)
+
         try:
             facts = collect_facts(path, extractors=extractor_list)
         except Exception as exc:
@@ -213,6 +221,7 @@ def plan_operations(
                 rule=match.rule,
                 explanations=match.explanations,
                 conditions=match.conditions,
+                identity_pre=identity_pre,
             )
             if op is not None:
                 op.perception = snap

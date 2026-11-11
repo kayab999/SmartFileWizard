@@ -16,7 +16,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
-        run: pip install -e ".[dev,ui]" || pip install -e ".[dev]"
+        # No fallback: a failed `ui` install must fail the job here, not
+        # later as ModuleNotFoundError inside the test suite.
+        run: pip install -e ".[dev,ui]"
       - name: Test
         run: pytest -q
   lint:

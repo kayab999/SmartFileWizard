@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..facts import FeatureExtractor
-from ..persist import atomic_write_text
+from ..persist import atomic_write_text, ensure_private_dir
 from .config import PerceptionConfig
 from .snapshot import compact_cache_features
 
@@ -67,6 +67,8 @@ class PerceptionCache:
     ):
         self.root = root or default_cache_dir(state_dir)
         self.root.mkdir(parents=True, exist_ok=True)
+        # E2 (F-05b): cached perception features mirror file contents.
+        ensure_private_dir(self.root)
         self.max_entries = max(1, max_entries)
         self.max_bytes = max(1, max_bytes)
         self._index_path = self.root / "index.json"
@@ -203,10 +205,12 @@ class CachingExtractor:
         self.cache = cache
         self.config_fp = config_fp
         self.name = getattr(inner, "name", "cached")
-        # I6: same-process memo (path, mtime_ns, size) → key. Skips the
-        # full SHA-256 re-read on repeated ticks/runs while the file is
-        # untouched. Cross-process still re-hashes (slow-correct default).
-        self._memo: dict[tuple[str, int, int], str] = {}
+        # I6: same-process memo (path, mtime_ns, size, ino, ctime_ns) →
+        # key. Skips the full SHA-256 re-read on repeated ticks/runs
+        # while the file is untouched. ino catches same-name
+        # substitutions; ctime catches in-place same-size rewrites whose
+        # mtime was restored (WP-C2/F-10). Cross-process still re-hashes.
+        self._memo: dict[tuple[str, int, int, int, int], str] = {}
 
     def _memo_key(self, path: Path) -> str | None:
         """Cache key via memo when mtime+size match, else full hash."""
@@ -217,7 +221,13 @@ class CachingExtractor:
         if st.st_size > MAX_CACHE_FILE_BYTES:
             logger.debug("cache skip large file %s", path)
             return None
-        memo = (str(path), st.st_mtime_ns, st.st_size)
+        memo = (
+            str(path),
+            st.st_mtime_ns,
+            st.st_size,
+            getattr(st, "st_ino", 0),
+            getattr(st, "st_ctime_ns", 0),
+        )
         hit = self._memo.get(memo)
         if hit is not None:
             return hit

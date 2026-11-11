@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible defect
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: FileWizard version
+      description: Output of `filewizard --version`
+      placeholder: "filewizard, version 0.11.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options: [AppImage, .deb, pip/source, other]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include rules YAML and commands; redact paths if needed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / journal excerpt
+      description: `~/.local/share/filewizard/filewizard.log` and `filewizard verify` output.

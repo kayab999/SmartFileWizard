@@ -8,6 +8,7 @@ Decisiones de diseño **estables** que el implementador no debe reinterpretar.
 | ADR-0002 | Cascada barato-primero (no dual full-scan) | Accepted |
 | ADR-0003 | Providers HTTP pluggables sin pesos en el wheel | Accepted |
 | ADR-0004 | MCP como consumidor del pipeline, no fork del core | Accepted (2026-08-11) |
+| ADR-0005 | Integridad transaccional: estados, niveles de evidencia, reconciliación | Accepted (2026-11-10) |
 
 Formato de un ADR nuevo: `docs/adr/ADR-NNNN-titulo-corto.md`
 

@@ -5,6 +5,23 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+# E4 (A-06): upper bound for user-supplied regex patterns. Generous for
+# filename matching; blocks pathological CPU-burning patterns at load.
+MAX_RULE_REGEX_LENGTH = 512
+
+# R5: cheap heuristic rejection of patterns that are *syntactically* able
+# to backtrack catastrophically (nested quantifiers). This is defence in
+# depth, not a proof — the stdlib ``re`` engine has no backtracking
+# limit, and a hostile rule file is already arbitrary code execution, so
+# the trust boundary is the rule author, not the regex engine.
+_NESTED_QUANTIFIER = re.compile(
+    r"(\([^)]*[+*?{][^)]*\)[+*?{])|(\[[^\]]*[+*?{][^\]]*\][+*?{])"
+)
+
+
+def _looks_catastrophic(pattern: str) -> bool:
+    return bool(_NESTED_QUANTIFIER.search(pattern))
+
 
 class Condition(BaseModel):
     """
@@ -64,9 +81,24 @@ class Condition(BaseModel):
     @field_validator("filename_regex", "not_filename_regex")
     @classmethod
     def validate_regexes(cls, value: str | None) -> str | None:
-        """R3: invalid regex fails at rule load time."""
+        """R3: invalid regex fails at rule load time.
+
+        E4: overly long patterns are rejected too — a pathological
+        pattern (hostile or pasted by accident) must fail at rule load,
+        not burn CPU on every scanned filename.
+        """
         if value is None:
             return value
+        if len(value) > MAX_RULE_REGEX_LENGTH:
+            raise ValueError(
+                f"regex too long ({len(value)} > {MAX_RULE_REGEX_LENGTH} "
+                "characters)"
+            )
+        if _looks_catastrophic(value):
+            raise ValueError(
+                "regex rejected: nested quantifier may cause catastrophic "
+                "backtracking (ReDoS); simplify the pattern"
+            )
         try:
             re.compile(value)
         except re.error as exc:

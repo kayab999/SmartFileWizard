@@ -1,7 +1,7 @@
 name: filewizard
 arch: amd64
 platform: linux
-version: 0.11.0
+version: 0.11.1
 section: utils
 priority: optional
 maintainer: Kayab Software <kayab999@users.noreply.github.com>

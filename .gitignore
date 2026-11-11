@@ -15,3 +15,7 @@ htmlcov/
 # AppImage tool / FUSE
 /tmp/appimagetool*
 \$TMP/
+
+# Generated audit bundles (not for distribution)
+AUDIT_REMEDIATION_CONSOLIDATED.md
+/tmp/opencode/audit/

@@ -203,8 +203,17 @@ def _check_row(row: dict, undo_done: list[dict]) -> str | None:
     status = str(row["status"])
     if status == "done":
         return _check_relocated(row)
+    if status == "needs_verify":
+        problem = _check_relocated(row)
+        if problem is not None:
+            return problem
+        # Present at the expected place, but never content-verified:
+        # metadata evidence only (ADR-0005 E2) — requires human review.
+        return "needs_verify: completed on filesystem-identity evidence only; content unverified"
     if status == "undone":
         return _check_undone(row, undo_done)
+    if status == "undo_partial":
+        return "undo incomplete: displaced backup not restored"
     if status == "pending":
         return "operation still pending"
     if status in _SOURCE_REMAINS:
@@ -254,10 +263,38 @@ def _check_undone(row: dict, undo_done: list[dict]) -> str | None:
                 return f"move destination still present after undo: {destination}"
         except OSError as exc:
             return f"cannot inspect destination {destination} ({exc})"
+    # ADR-0005 invariant 6: a complete undo restored the displaced
+    # backup, which also clears the recorded intent. A remaining record
+    # with a live backup means the undo never finished (F-17).
+    displaced = _path(row.get("displaced_path"))
+    if displaced is not None:
+        try:
+            if displaced.is_file():
+                return f"displaced backup not restored: {displaced}"
+        except OSError as exc:
+            return f"cannot inspect displaced backup {displaced} ({exc})"
     return None
 
 
 def _restored_path(row: dict, undo_done: list[dict]) -> Path | None:
+    # Causal link first (ADR-0005 invariant 7): the undo row that
+    # recorded this operation as its original_operation_id.
+    op_id = row.get("id")
+    if op_id is not None:
+        causal = [
+            undo
+            for undo in undo_done
+            if undo.get("original_operation_id") is not None
+            and int(undo["original_operation_id"]) == int(op_id)
+        ]
+        if causal:
+            latest = max(causal, key=lambda undo: int(undo["id"]))
+            recorded = _path(latest.get("destination"))
+            if recorded is not None:
+                return recorded
+    # Legacy fallback: journals written before original_operation_id
+    # existed can only be matched by path. Ambiguous when several
+    # operations shared paths — reported via the size/hash checks below.
     destination_key = _key(row.get("destination"))
     matches = [
         undo
@@ -411,10 +448,21 @@ def _select_rows(connection: sqlite3.Connection) -> list[dict]:
     hash_sql = (
         "content_sha256" if "content_sha256" in columns else "NULL AS content_sha256"
     )
+    displaced_sql = (
+        "displaced_path"
+        if "displaced_path" in columns
+        else "NULL AS displaced_path"
+    )
+    original_sql = (
+        "original_operation_id"
+        if "original_operation_id" in columns
+        else "NULL AS original_operation_id"
+    )
     cursor = connection.execute(
         f"""
         SELECT id, batch_id, op, source, destination, status,
-               {size_sql}, {created_sql}, {hash_sql}
+               {size_sql}, {created_sql}, {hash_sql},
+               {displaced_sql}, {original_sql}
         FROM operations
         ORDER BY id
         """

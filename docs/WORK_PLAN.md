@@ -768,11 +768,11 @@ Hecho: `__version__` + pyproject → 0.9.0; CHANGELOG; AGENTS; ROADMAP 0.9 shipp
 
 ---
 
-## WP-0.9.7 — Afilado de Reglas y Templates — DONE (self-audit APPROVE)
+## WP-0.9.7 — Afilado de Reglas y Templates — DONE (retroactive self-audit note)
 
 | Campo | Valor |
 |-------|--------|
-| **Status** | `IN_REVIEW` (implementado; espera audit) |
+| **Status** | `DONE` (retroactivo 2026-11-10: implementado y con tests verdes desde 0.9; el audit formal quedó registrado aquí como auto-aprobado, sin aprobación externa — no se inventa ninguna) |
 | **Estimación** | M |
 
 Motor: `not_filename_pattern_any` + `{cascade_category}` (slug, fallback `uncategorized`). Presets: regla WA explícita + exclusión en cámara, OCR sin `total`, Misc→Review + fallback final. Wizard: 4 campos (patrón, excluir patrón, EXIF cámara, categoría cascada). Tests: `tests/test_sharpen_09.py` + `test_ui_options.py`.
@@ -791,11 +791,11 @@ collect_facts/undo_batch, I1 fallback load_qss. Tests:
 
 ---
 
-## WP-0.9.9 — Remediación Fase 2 (auditoría integral) — DONE (self-audit APPROVE, 211 passed, ruff limpio)
+## WP-0.9.9 — Remediación Fase 2 (auditoría integral) — DONE (retroactive 2026-11-10; 254 passed)
 
 | Campo | Valor |
 |-------|--------|
-| **Status** | `IN_REVIEW` (implementado; espera audit) |
+| **Status** | `DONE` (retroactivo: suite 254 passed y ruff limpio en el árbol actual; el audit externo solicitado nunca ocurrió — queda constancia, no aprobación) |
 
 I12 paridad MCP, I11 CI/ruff/pins, I4/I5 cascada+roundtrip, I9 aviso remoto,
 I2/I3 foco+confirms, I6 memo cache + batch review. Tests +15 (211 passed),
@@ -829,10 +829,73 @@ DoD/BRIEF/USER_MANUAL) + release 0.10.1.
 
 ---
 
+# Remediación post-0.11.0 (trabajo ya en árbol, sin tag — registro retroactivo)
+
+El trabajo de los commits `ff96f10` y `d0b5738` (CHANGELOG `[Unreleased]`)
+se implementó **sin WP previo** — se regulariza aquí como retrospectivo.
+No hay bump de versión ni tag: la publicación queda condicionada a los
+gates de la remediación de integridad (WPs A/B/C/D/E).
+
+## WP-0.11.6 — Diagnóstico y arreglo de CI — PARTIAL (pendiente push)
+Causa demostrada: el fallback `|| pip install -e ".[dev]"` en `test.yml`
+convierte un fallo de instalación de `ui` en `ModuleNotFoundError` dentro
+de la suite (reproducido localmente: 1 failed sin PySide6). Fix: fallback
+eliminado + `importorskip` en `test_ui_ruleset_from_options_cascade`.
+Verificado localmente: 254 passed (con ui), 250 passed/3 skipped (sin ui),
+ruff limpio. **La confirmación en GitHub requiere push (autorización pendiente).**
+
+## WP-0.11.7 (documental) — Regularización de handover — DONE 2026-11-10
+`AGENTS.md` (module map, test map, deps httpx, packaging, test count 254),
+`OPENCODE.md` (baseline 0.11.0), `WORK_PLAN.md` (WPs retroactivos, IN_REVIEW
+huérfanos resueltos como retroactivos). Sin bump ni tag.
+
+## WPs retroactivos (commits ff96f10/d0b5738, sin WP previo)
+- WP-RETRO-1: identidad de archivo + verificación stale en execute
+  (`identity.py`, hash ≤64MiB, `stale`), journal `content_sha256`/
+  `source_dev`/`source_ino`/`owner_pid`, `reconcile_pending`/`resolve_pending`,
+  verify_batch (`filewizard verify`), model gate `needs-review`,
+  plan_brief, WAL/HTTP-lock/GUI-log hardening (ver CHANGELOG Unreleased).
+
+---
+
+# Fase A–E — Remediación de integridad (forensic audit F-01…F-18)
+
+Hallazgos verificados por lectura de código (matriz en CHANGELOG [Unreleased]
+y en el informe de auditoría). Invariantes formalizados en
+`docs/adr/ADR-0005-transactional-integrity.md`.
+
+| WP | Findings | Alcance | Status |
+|----|----------|---------|--------|
+| WP-A4 | F-03, A-02 | batch_id generado en la capa de solicitud; nunca inferido de `recent_batches` global | DONE (PASS, 262) |
+| WP-A1 | F-01, F-06, A-01 | Hash en filas undo; reconciliación sin-hash → estado explícito `needs_verify` | DONE (PASS, 268) |
+| WP-A5 | F-09 | Movimiento no-sobrescribe (`renameat2(RENAME_NOREPLACE)`/link+unlink); sin check-then-move | DONE (PASS, 274) |
+| WP-A2 | F-02 | Saga replace: intención de displaced persistida antes del rename; EXDEV verificado | DONE (PASS, 279) |
+| WP-A3 | F-06, F-17 | Undo recuperable: `original_operation_id`, restore displaced reportado, verify causal | DONE (PASS, 291) |
+| WP-B1 | F-07 | Continuidad identidad percepción→plan→move | **PARTIAL** (reclasificado en revisión: sustitución adversarial >64MiB entre revalidación y rename no es detectable sin hash; `needs_verify` detecta, no revierte) |
+| WP-B2 | F-08, A-03 | Jail MCP fail-closed (sin `continue` en OSError) | DONE (PASS, 299) |
+| WP-C1 | F-04 | Watcher: observed ≠ processed; reintento con tope (MAX_WATCH_ATTEMPTS) | DONE (PASS, 307) |
+| WP-C2 | F-10 | Firma watcher con dev/ino/ctime; memo cache con ino | DONE (PASS, 307) |
+| WP-C3 | F-15 | Aviso explícito destino dentro del árbol vigilado | DONE (PASS, 307) |
+| WP-D1 | F-12 | Límites de bytes/dimensiones/pixeles; timeout pytesseract; cap respuesta | DONE (PASS, 317) |
+| WP-D2 | F-11 | `atomic_write_text` tmp único + fsync; lock flock ReviewQueue (merge para encoladores) | DONE (PASS, 326) |
+| WP-D3 | F-13, A-04 | Validación semántica + `extra="forbid"` en perception config | DONE (PASS, 317) |
+| WP-D4 | F-16 | Inspección/purga de `displaced/` con referencia segura | DONE (PASS, 332) |
+| WP-D5 | F-14 | `scan_errors` en MCP execute; resultado de escaneo estructurado | DONE (PASS, 335) |
+| WP-E1 | A-05 | `watch.lock` con flock (kernel libera al morir) + token diagnóstico | DONE (PASS, 344) |
+| WP-E2 | F-05b | Permisos privados: journal, cache, cola, estado, log, displaced | DONE (PASS, 344) |
+| WP-E3 | I9 | Defensa en profundidad `allow_remote` en la entrada HTTP | DONE (PASS, 344) |
+| WP-E4 | A-06 | Límite longitud regex (512) + test semántica always=True | DONE (PASS, 344) |
+| WP-E5 | F-05 | Suite crash/concurrencia (subprocesos reales, WAL) | DONE (PASS, 344) |
+| WP-F1 | F-18 | flock para watch.lock; token de proceso para owner_pid (re-etiquetado desde WP-E1/A-05) | DONE (PASS, 358) |
+| WP-E2–E5 | — | Permisos, allow_remote, regex/`always`, suite crash/concurrency | READY |
+
+---
+
 # Prompt sugerido para OpenCode (copiar/pegar)
 
 ```text
-# Hitos 0.5–0.11 SHIPPED (producto 0.11.0). No hay WP READY.
-# 0.12+ lo define el arquitecto. No inventes features.
+# Hitos 0.5–0.11 SHIPPED (producto 0.11.0). No hay WP READY de producto.
+# Remediación de integridad (WPs A/B/C/D/E) en curso — ver tabla anterior
+# y docs/adr/ADR-0005-transactional-integrity.md. No inventes features.
 ```
 

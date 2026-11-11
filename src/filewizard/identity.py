@@ -84,6 +84,31 @@ def content_matches(path: Path, *, size: int | None, sha256: str | None) -> bool
         return False
 
 
+def fs_identity_matches(
+    path: Path, *, size: int, source_dev: int | None, source_ino: int | None
+) -> bool:
+    """E2 evidence (ADR-0005): destination is the same file object moved.
+
+    True only when the recorded size and the recorded source dev/inode
+    match the live destination stat — ``rename(2)`` preserves both on one
+    filesystem. Needs both dev and ino recorded; metadata-only evidence
+    never certifies content.
+    """
+    if source_dev is None or source_ino is None:
+        return False
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        st = path.stat()
+    except OSError:
+        return False
+    return (
+        int(st.st_size) == int(size)
+        and int(st.st_dev) == int(source_dev)
+        and int(st.st_ino) == int(source_ino)
+    )
+
+
 def pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)

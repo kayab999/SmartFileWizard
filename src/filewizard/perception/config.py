@@ -4,12 +4,34 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..persist import atomic_write_text
 
 
+def _require_range(
+    name: str, value: float, *, minimum: float, maximum: float
+) -> float:
+    if not minimum <= value <= maximum:
+        raise ValueError(
+            f"{name} must be between {minimum} and {maximum}, got {value!r}"
+        )
+    return value
+
+
+# Resource limits for the perception chain (WP-D1/F-12). Conservative
+# defaults derived from real use: images for OCR/VLM are photographs or
+# screenshots; anything beyond these caps is either an accident or an
+# attack, and both should fail fast.
+DEFAULT_MAX_IMAGE_BYTES = 32 * 1024 * 1024
+DEFAULT_MAX_IMAGE_PIXELS = 64_000_000
+DEFAULT_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
 class OcrSettings(BaseModel):
+    model_config = {"extra": "forbid"}
+
     provider: Literal["none", "tesseract", "llama_http"] = "none"
     base_url: str = "http://127.0.0.1:8080/v1"
     model: str = "GLM-OCR-Q8_0"
@@ -17,9 +39,49 @@ class OcrSettings(BaseModel):
     max_image_edge: int = 1600
     temperature: float = 0.0
     langs: str | None = None  # tesseract
+    max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES
+    max_image_pixels: int = DEFAULT_MAX_IMAGE_PIXELS
+    max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
+
+    @field_validator("timeout_s")
+    @classmethod
+    def _v_timeout(cls, v: float) -> float:
+        return _require_range("timeout_s", v, minimum=0.1, maximum=3600)
+
+    @field_validator("max_image_edge")
+    @classmethod
+    def _v_edge(cls, v: int) -> int:
+        if not 16 <= v <= 8192:
+            raise ValueError(f"max_image_edge must be 16..8192, got {v!r}")
+        return v
+
+    @field_validator("temperature")
+    @classmethod
+    def _v_temperature(cls, v: float) -> float:
+        return _require_range("temperature", v, minimum=0.0, maximum=2.0)
+
+    @field_validator("max_image_bytes", "max_image_pixels")
+    @classmethod
+    def _v_image_limits(cls, v: int, info) -> int:
+        minimum = 1024 if info.field_name == "max_image_bytes" else 65536
+        if v < minimum:
+            raise ValueError(
+                f"{info.field_name} must be >= {minimum}, got {v!r}"
+            )
+        return v
+
+    @field_validator("max_upload_bytes", "max_response_bytes")
+    @classmethod
+    def _v_payload_limits(cls, v: int, info) -> int:
+        if v < 65536:
+            raise ValueError(f"{info.field_name} must be >= 65536, got {v!r}")
+        return v
 
 
 class VisionSettings(BaseModel):
+    model_config = {"extra": "forbid"}
+
     provider: Literal["none", "llama_http"] = "none"
     base_url: str = "http://127.0.0.1:8081/v1"
     model: str = "Qwen3-VL-2B-Instruct"
@@ -36,10 +98,50 @@ class VisionSettings(BaseModel):
             "social",
         ]
     )
+    max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES
+    max_image_pixels: int = DEFAULT_MAX_IMAGE_PIXELS
+    max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
+
+    @field_validator("timeout_s")
+    @classmethod
+    def _v_timeout(cls, v: float) -> float:
+        return _require_range("timeout_s", v, minimum=0.1, maximum=3600)
+
+    @field_validator("max_image_edge")
+    @classmethod
+    def _v_edge(cls, v: int) -> int:
+        if not 16 <= v <= 8192:
+            raise ValueError(f"max_image_edge must be 16..8192, got {v!r}")
+        return v
+
+    @field_validator("temperature")
+    @classmethod
+    def _v_temperature(cls, v: float) -> float:
+        return _require_range("temperature", v, minimum=0.0, maximum=2.0)
+
+    @field_validator("max_image_bytes", "max_image_pixels")
+    @classmethod
+    def _v_image_limits(cls, v: int, info) -> int:
+        minimum = 1024 if info.field_name == "max_image_bytes" else 65536
+        if v < minimum:
+            raise ValueError(
+                f"{info.field_name} must be >= {minimum}, got {v!r}"
+            )
+        return v
+
+    @field_validator("max_upload_bytes", "max_response_bytes")
+    @classmethod
+    def _v_payload_limits(cls, v: int, info) -> int:
+        if v < 65536:
+            raise ValueError(f"{info.field_name} must be >= 65536, got {v!r}")
+        return v
 
 
 class CascadeSettings(BaseModel):
     """Cheap-first cascade thresholds (see docs/PLAN_CASCADE.md)."""
+
+    model_config = {"extra": "forbid"}
 
     enabled: bool = False
     high_confidence: float = 0.75
@@ -53,16 +155,52 @@ class CascadeSettings(BaseModel):
     # HuggingFace download of CLIP/SigLIP weights (can be hundreds of MB).
     allow_model_download: bool = False
 
+    @field_validator(
+        "high_confidence", "medium_confidence", "vlm_min_confidence"
+    )
+    @classmethod
+    def _v_confidence(cls, v: float) -> float:
+        return _require_range(
+            "confidence threshold", v, minimum=0.0, maximum=1.0
+        )
+
+    @field_validator("stage2_keyword_min_hits")
+    @classmethod
+    def _v_keyword_hits(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(
+                f"stage2_keyword_min_hits must be >= 0, got {v!r}"
+            )
+        return v
+
 
 class CacheSettings(BaseModel):
     """Disk cache of perception features keyed by file content hash."""
+
+    model_config = {"extra": "forbid"}
 
     enabled: bool = True
     max_entries: int = 5000
     max_bytes: int = 64 * 1024 * 1024
 
+    @field_validator("max_entries")
+    @classmethod
+    def _v_entries(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError(f"max_entries must be >= 1, got {v!r}")
+        return v
+
+    @field_validator("max_bytes")
+    @classmethod
+    def _v_bytes(cls, v: int) -> int:
+        if v < 1024 * 1024:
+            raise ValueError(f"max_bytes must be >= 1 MiB, got {v!r}")
+        return v
+
 
 class PerceptionConfig(BaseModel):
+    model_config = {"extra": "forbid"}
+
     version: int = 1
     heuristics: bool = True
     # Non-loopback OCR/vision URLs are not called unless this is true.
@@ -172,6 +310,10 @@ def load_perception_config(
       1. explicit profile name (built-in)
       2. YAML file (path or default state_dir/perception.yaml)
       3. lite defaults (heuristics only; OCR off until requested)
+
+    Unknown or invalid fields fail with a pydantic error listing the
+    offending key (F-13/A-04: a typo must not silently become a
+    default).
     """
     if profile:
         return config_from_profile(profile)

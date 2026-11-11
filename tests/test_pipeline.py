@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from filewizard.executor import Executor
 from filewizard.journal import Journal
 from filewizard.models import Action, Condition, Rule, RuleSet
@@ -74,6 +76,8 @@ def test_plan_operations_multi_rule_cascade(tmp_path: Path) -> None:
 
 
 def test_ui_ruleset_from_options_cascade(tmp_path: Path) -> None:
+    # CI fallback (no `ui` extra) must skip, not fail with ImportError.
+    pytest.importorskip("PySide6", reason="ui extra not installed")
     from filewizard.ui.workers import ruleset_from_options
 
     ruleset = ruleset_from_options({"rules_file": "rules_sharp.yaml"})

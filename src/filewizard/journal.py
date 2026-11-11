@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from .persist import ensure_private_file
 
 
 class Journal:
@@ -28,6 +29,16 @@ class Journal:
         # R12: timeout for concurrent access; one connection per Journal instance/thread.
         self.conn = sqlite3.connect(self.path, timeout=10)
         self.conn.row_factory = sqlite3.Row
+        # E2 (F-05b): the journal records user paths — owner-only.
+        ensure_private_file(self.path)
+        # R5 perms round: the WAL/SHM side files carry the same user-path
+        # data and SQLite keeps a preexisting file's mode when reconnecting.
+        # Tighten them if they already exist (fresh creation follows the
+        # database's 0600). Best-effort, like the rest of E2.
+        for side in ("-wal", "-shm"):
+            side_path = Path(str(self.path) + side)
+            if side_path.exists():
+                ensure_private_file(side_path)
         # 0.9.4: WAL so readers (preview/history) block writers less.
         # Separate try so busy_timeout still applies if WAL is unavailable.
         try:
@@ -63,6 +74,7 @@ class Journal:
                 source_ino INTEGER,
                 displaced_path TEXT,
                 owner_pid INTEGER,
+                original_operation_id INTEGER,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -117,12 +129,22 @@ class Journal:
             ("source_dev", "INTEGER"),
             ("source_ino", "INTEGER"),
             ("displaced_path", "TEXT"),
+            ("displaced_size", "INTEGER"),
+            ("displaced_sha256", "TEXT"),
+            ("displaced_mtime_ns", "INTEGER"),
+            ("displaced_dev", "INTEGER"),
+            ("displaced_ino", "INTEGER"),
             ("owner_pid", "INTEGER"),
+            ("original_operation_id", "INTEGER"),
         ):
             if name not in columns:
-                self.conn.execute(
-                    f"ALTER TABLE operations ADD COLUMN {name} {ddl}"
-                )
+                try:
+                    self.conn.execute(
+                        f"ALTER TABLE operations ADD COLUMN {name} {ddl}"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc):
+                        raise
         self.conn.commit()
 
     @staticmethod
@@ -144,6 +166,7 @@ class Journal:
         source_dev: int | None = None,
         source_ino: int | None = None,
         owner_pid: int | None = None,
+        original_operation_id: int | None = None,
     ) -> int:
         now = self._now()
         perception_json: str | None
@@ -174,10 +197,11 @@ class Journal:
                 source_dev,
                 source_ino,
                 owner_pid,
+                original_operation_id,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 batch_id,
@@ -195,6 +219,7 @@ class Journal:
                 source_dev,
                 source_ino,
                 owner_pid if owner_pid is not None else os.getpid(),
+                original_operation_id,
                 now,
                 now,
             ),
@@ -260,15 +285,35 @@ class Journal:
 
         self.conn.commit()
 
-    def set_displaced(self, op_id: int, path: Path | str) -> None:
-        """Record the backup path of a file displaced by replace."""
+    def set_displaced(
+        self,
+        op_id: int,
+        path: Path | str,
+        *,
+        size: int | None = None,
+        sha256: str | None = None,
+        mtime_ns: int | None = None,
+        device: int | None = None,
+        inode: int | None = None,
+    ) -> None:
+        """Persist displacement intent and evidence of the displaced bytes.
+
+        R8.4: absence of a backup is not evidence of restoration. The
+        recorded identity lets undo distinguish a restored occupant from
+        a foreign file before closing the saga.
+        """
         self.conn.execute(
             """
             UPDATE operations
-            SET displaced_path = ?, updated_at = ?
+            SET displaced_path = ?, displaced_size = ?, displaced_sha256 = ?,
+                displaced_mtime_ns = ?, displaced_dev = ?, displaced_ino = ?,
+                updated_at = ?
             WHERE id = ?
             """,
-            (str(path), self._now(), op_id),
+            (
+                str(path), size, sha256, mtime_ns, device, inode,
+                self._now(), op_id,
+            ),
         )
         self.conn.commit()
 
@@ -293,7 +338,7 @@ class Journal:
                 status = 'undone',
                 updated_at = ?
             WHERE id = ?
-              AND status = 'done'
+              AND status IN ('done', 'needs_verify', 'undo_partial')
             """,
             (
                 now,
@@ -303,14 +348,45 @@ class Journal:
 
         self.conn.commit()
 
+    def mark_undo_partial(self, op_id: int) -> bool:
+        """Mark an operation as partially undone (ADR-0005 state).
+
+        The reverse move (A) succeeded but the displaced backup restore
+        (B) did not. The row keeps its identity/undo evidence and stays
+        non-purgeable until the restore is retried and completes.
+        Returns True when the row was transitioned.
+        """
+        now = self._now()
+        cur = self.conn.execute(
+            """
+            UPDATE operations
+            SET
+                status = 'undo_partial',
+                updated_at = ?
+            WHERE id = ?
+              AND status IN ('done', 'needs_verify')
+            """,
+            (
+                now,
+                op_id,
+            ),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
     def last_successful_moves(self, limit: int = 100) -> list[Any]:
-        """Only moves still eligible for undo (status=done, not already undone)."""
+        """Moves still eligible for undo or undo-restore retry.
+
+        ``undo_partial`` rows are included so a partial undo (reverse
+        move done, backup restore pending) can be resumed; undo_operations
+        handles them without repeating the reverse move.
+        """
         cur = self.conn.execute(
             """
             SELECT *
             FROM operations
             WHERE op = 'move'
-              AND status = 'done'
+              AND status IN ('done', 'needs_verify', 'undo_partial')
             ORDER BY id DESC
             LIMIT ?
             """,
@@ -360,10 +436,12 @@ class Journal:
         return cur.fetchall()
 
     def done_moves_for_batch(self, batch_id: str) -> list[Any]:
+        """Moves of a batch eligible for undo or undo-restore retry."""
         cur = self.conn.execute(
             """
             SELECT * FROM operations
-            WHERE batch_id = ? AND op = 'move' AND status = 'done'
+            WHERE batch_id = ? AND op = 'move'
+              AND status IN ('done', 'needs_verify', 'undo_partial')
             ORDER BY id DESC
             """,
             (batch_id,),
@@ -379,9 +457,16 @@ class Journal:
     def reconcile_pending(self) -> tuple[int, int]:
         """Promote pending rows whose moved bytes match the recorded hash.
 
+        Evidence ladder (ADR-0005):
+          E1 content hash match          → done
+          E2 fs-identity (dev/ino/size)  → needs_verify (metadata evidence
+                                           only; never presented as done)
+          E3 presence alone              → insufficient, row stays pending
+
         Size alone is not enough. A pending replace whose backup is still
         aside and whose source is still present is put back first.
-        Returns ``(promoted, still_pending)``.
+        Returns ``(promoted, still_pending)``. Idempotent: re-running with
+        unchanged filesystem state promotes nothing twice.
         """
         promoted = 0
         for row in self.pending_operations():
@@ -398,33 +483,80 @@ class Journal:
             displaced_raw = (
                 row["displaced_path"] if "displaced_path" in row.keys() else None
             )
+            # R8.3: size alone cannot identify our reservation. Only a
+            # genuinely missing destination is free; an empty file or a
+            # symlink is foreign and is never overwritten.
             if displaced_raw and source.exists() and not destination.exists():
                 backup = Path(str(displaced_raw))
                 if backup.is_file():
                     try:
                         destination.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(backup), str(destination))
+                        from .fsmove import move_noreplace
+
+                        move_noreplace(backup, destination)
                         self.clear_displaced(int(row["id"]))
                     except OSError:
                         pass
                 continue
+            if displaced_raw and source.exists() and destination.exists():
+                backup = Path(str(displaced_raw))
+                if backup.is_file():
+                    # R8.3: a foreign file (including an empty regular file
+                    # or a symlink) is never our placeholder. Preserve the
+                    # backup and surface an explicit review state instead of
+                    # overwriting.
+                    self.finish_operation(
+                        int(row["id"]),
+                        status="needs_verify",
+                        destination=destination,
+                        error=(
+                            "destination occupied during crash recovery; "
+                            "displaced backup preserved for review"
+                        ),
+                    )
+                    promoted += 1
+                    continue
             try:
-                from .identity import content_matches
+                from .identity import fs_identity_matches, content_matches
 
                 source_gone = not source.exists()
-                destination_ok = content_matches(
+                if source_gone and content_matches(
                     destination, size=int(recorded), sha256=digest
-                )
+                ):
+                    # E1: content verified.
+                    self.finish_operation(
+                        int(row["id"]),
+                        status="done",
+                        destination=destination,
+                        byte_size=int(recorded),
+                    )
+                    promoted += 1
+                    continue
+                if (
+                    source_gone
+                    and digest is None
+                    and fs_identity_matches(
+                        destination,
+                        size=int(recorded),
+                        source_dev=row["source_dev"]
+                        if "source_dev" in row.keys()
+                        else None,
+                        source_ino=row["source_ino"]
+                        if "source_ino" in row.keys()
+                        else None,
+                    )
+                ):
+                    # E2: same-file-object evidence only → needs_verify.
+                    self.finish_operation(
+                        int(row["id"]),
+                        status="needs_verify",
+                        destination=destination,
+                        byte_size=int(recorded),
+                    )
+                    promoted += 1
+                    continue
             except OSError:
                 continue
-            if source_gone and destination_ok:
-                self.finish_operation(
-                    int(row["id"]),
-                    status="done",
-                    destination=destination,
-                    byte_size=int(recorded),
-                )
-                promoted += 1
         return promoted, len(self.pending_operations())
 
     def resolve_pending(self, status: str = "interrupted") -> int:

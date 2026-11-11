@@ -104,14 +104,14 @@ def test_reconcile_ignores_stranger_of_the_same_size(tmp_path: Path) -> None:
 
 
 def test_replace_failure_restores_the_previous_file(tmp_path: Path, monkeypatch) -> None:
-    real_move = __import__("shutil").move
+    real_move = __import__("filewizard.fsmove", fromlist=["move_noreplace_unique"]).move_noreplace_unique
 
     def boom(src, dst, *args, **kwargs):
-        if "displaced" in str(src):
-            return real_move(src, dst)
-        raise OSError("disk full")
+        if "displaced" not in str(src):
+            raise OSError("disk full")
+        return real_move(src, dst)
 
-    monkeypatch.setattr("filewizard.executor.shutil.move", boom)
+    monkeypatch.setattr("filewizard.executor.move_noreplace_unique", boom)
     out = tmp_path / "out"
     out.mkdir()
     (out / "a.txt").write_text("old", encoding="utf-8")

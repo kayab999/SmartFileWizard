@@ -23,6 +23,8 @@ def test_http_lock_serializes_calls(tmp_path: Path) -> None:
         order.append("exit")
 
         class Resp:
+            content = b"ok"
+
             def raise_for_status(self):
                 return None
 

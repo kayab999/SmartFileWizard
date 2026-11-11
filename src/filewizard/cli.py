@@ -187,6 +187,13 @@ def cli() -> None:
     help="Apply matches that depend only on OCR, vision, or cascade evidence.",
 )
 @click.option(
+    "--allow-partial-scan",
+    is_flag=True,
+    default=False,
+    help="Proceed with --execute even when some paths could not be "
+    "scanned (F-14: aborted by default so no file is silently left out).",
+)
+@click.option(
     "--verbose",
     is_flag=True,
     default=False,
@@ -205,6 +212,7 @@ def run(
     state_dir: Path,
     yes: bool,
     allow_model_only: bool,
+    allow_partial_scan: bool,
     verbose: bool,
 ) -> None:
     """Scan a directory and apply organization rules."""
@@ -286,27 +294,57 @@ def run(
         click.echo(f"Planned operations: {len(operations)}")
         click.echo("")
 
+        # WP-D5 (F-14): a destructive run over a partial scan could move
+        # files while others were silently skipped — the plan is not the
+        # whole truth. Abort unless explicitly overridden.
+        if execute and scan_errors and not allow_partial_scan:
+            for err in scan_errors[:10]:
+                click.echo(f"  {err}", err=True)
+            if len(scan_errors) > 10:
+                click.echo(f"  … and {len(scan_errors) - 10} more", err=True)
+            raise click.ClickException(
+                "Refusing to execute over an incomplete scan "
+                f"({len(scan_errors)} path error(s)). Re-run with "
+                "--allow-partial-scan to proceed anyway."
+            )
+
         for op in operations:
             echo_operation(op, verbose=verbose)
 
         held = [op for op in operations if op.status == "needs-review"]
         if held:
-            from .review_queue import ReviewQueue
+            from .review_queue import (
+                ReviewQueue,
+                ReviewQueueLockError,
+            )
 
             queue = ReviewQueue(state_dir=state_dir)
             for op in held:
                 queue.add_model_hold(op.source, op.error or "", save=False)
+            enqueue_ok = True
             try:
-                queue.save()
-            except OSError as exc:
+                # WP-D2 (F-11): enqueue commits under the lock with a
+                # merge, so it can never clobber a concurrent writer.
+                queue.merge_new_items()
+            except (ReviewQueueLockError, OSError) as exc:
+                enqueue_ok = False
                 logging.getLogger("filewizard").warning(
                     "review queue save failed: %s", exc
                 )
-            click.echo(
-                f"{len(held)} file(s) held for review: model evidence does not "
-                "match a deterministic rule. Re-run with --allow-model-only "
-                "to apply them."
-            )
+            if enqueue_ok:
+                click.echo(
+                    f"{len(held)} file(s) held for review: model evidence "
+                    "does not match a deterministic rule. Re-run with "
+                    "--allow-model-only to apply them."
+                )
+            else:
+                # The holds did NOT reach the queue: never claim success.
+                click.echo(
+                    f"WARNING: {len(held)} file(s) needed review but the "
+                    "review queue could not be written (locked or "
+                    "unwritable). They are NOT enqueued; re-run to retry.",
+                    err=True,
+                )
 
         if not execute:
             click.echo("")
@@ -751,14 +789,43 @@ def watch_once_cmd(
         click.echo(f"  {status}: {count}")
 
 
-@watch_cmd.command("list")
+@watch_cmd.command("giveups")
 @click.option(
     "--state-dir",
     type=click.Path(path_type=Path),
     default=Path("~/.local/share/filewizard").expanduser(),
     help="State and journal directory.",
 )
-def watch_list(state_dir: Path) -> None:
+@click.option("--clear", is_flag=True, help="Delete the give-up log after printing.")
+def watch_giveups(state_dir: Path, clear: bool) -> None:
+    """Show events exhausted after MAX_WATCH_ATTEMPTS (or failed enqueues)."""
+    from .watch import clear_giveups, read_giveup_error, read_giveups
+
+    state_dir = state_dir.expanduser().resolve()
+    persistence_error = read_giveup_error(state_dir)
+    if persistence_error is not None:
+        click.echo(
+            "watch giveups persistence ERROR: "
+            f"{persistence_error.get('error')}",
+            err=True,
+        )
+    events = read_giveups(state_dir)
+    if not events:
+        click.echo("No watch give-up events recorded.")
+        if not clear:
+            return
+        clear_giveups(state_dir)
+        return
+    for ev in events:
+        click.echo(
+            f"{ev.get('ts')}  {ev.get('reason')}  "
+            f"attempts={ev.get('attempts')}  "
+            f"status={ev.get('last_status')}  "
+            f"path={ev.get('path')}"
+        )
+    if clear:
+        clear_giveups(state_dir)
+        click.echo(f"Cleared {len(events)} event(s).")
     """List active watches (enable list)."""
     from .watch import _active_watches_path, load_active_watches
 
@@ -1191,6 +1258,98 @@ def perception_test(
             if k in {"provider", "model", "error", "raw"}:
                 continue
             click.echo(f"  {k}: {v}")
+
+
+@cli.command("displaced")
+@click.option(
+    "--state-dir",
+    type=click.Path(path_type=Path),
+    default=Path("~/.local/share/filewizard").expanduser(),
+    help="State directory holding displaced/ and journal.db.",
+)
+@click.option(
+    "--execute",
+    is_flag=True,
+    default=False,
+    help="Actually delete the purgeable backups (default: preview only).",
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Do not ask for confirmation (with --execute).",
+)
+@click.option(
+    "--older-than-days",
+    type=float,
+    default=None,
+    help="Only purge backups older than this many days.",
+)
+def displaced_cmd(
+    state_dir: Path,
+    execute: bool,
+    yes: bool,
+    older_than_days: float | None,
+) -> None:
+    """Inspect displaced/ backups; purge only the unreferenced ones (F-16).
+
+    Backups referenced by journal rows (or whose creating row is still in
+    a state that may need them: pending/done/needs_verify/undo_partial)
+    are always protected and never deleted.
+    """
+    from .displaced import purge_displaced
+    from .logsetup import setup_file_logging
+
+    state_dir = state_dir.expanduser().resolve()
+    setup_file_logging(state_dir)
+
+    if execute and not yes:
+        click.echo("The following unreferenced backups would be removed:")
+        report = purge_displaced(
+            state_dir, older_than_days=older_than_days, execute=False
+        )
+        for entry in report.entries:
+            if not entry.protected:
+                click.echo(
+                    f"  {entry.path.name}  {entry.size} bytes  "
+                    f"age {entry.age_days:.1f}d"
+                )
+        if not report.entries or report.purgeable_bytes == 0:
+            click.echo("  (nothing purgeable)")
+        click.confirm("Delete them?", abort=True)
+        execute = True
+
+    report = purge_displaced(
+        state_dir, older_than_days=older_than_days, execute=execute
+    )
+
+    click.echo(f"displaced/: {report.root}")
+    for problem in report.problems:
+        click.echo(f"  problem: {problem}")
+    protected = [e for e in report.entries if e.protected]
+    click.echo(
+        f"Total: {len(report.entries)} file(s), "
+        f"{report.total_bytes} bytes "
+        f"({len(protected)} protected, {report.purgeable_bytes} "
+        "bytes purgeable)"
+    )
+    for entry in report.entries:
+        state = (
+            f"referenced by op {entry.referenced_by[0]}"
+            if entry.referenced_by
+            else (f"op {entry.op_id} status {entry.status}" if entry.op_id is not None else "unreferenced")
+        )
+        flag = "PROTECTED" if entry.protected else (
+            "PURGED" if entry.path in report.purged else "purgeable"
+        )
+        click.echo(
+            f"  [{flag}] {entry.path.name}  {entry.size} bytes  "
+            f"age {entry.age_days:.1f}d  ({state})"
+        )
+    for path, err in report.failed:
+        click.echo(f"  FAILED: {path.name}: {err}")
+    if not execute and report.purgeable_bytes:
+        click.echo("Preview only — re-run with --execute --yes to purge.")
 
 
 @cli.command("reset")

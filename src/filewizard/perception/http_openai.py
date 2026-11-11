@@ -68,28 +68,47 @@ def _bind_client(client: httpx.Client | None) -> None:
         _ACTIVE_CLIENT = client
 
 
-def _resize_image_bytes(path: Path, max_edge: int) -> tuple[bytes, str]:
-    """Return PNG/JPEG bytes bounded by max_edge (R11)."""
+def _resize_image_bytes(
+    path: Path,
+    max_edge: int,
+    *,
+    max_bytes: int = 32 * 1024 * 1024,
+    max_pixels: int = 64_000_000,
+) -> tuple[bytes, str]:
+    """Return PNG/JPEG bytes bounded by max_edge (R11) and resource caps
+    (WP-D1/F-12: byte cap before open, pixel cap before decode)."""
     try:
         from PIL import Image
     except ImportError:
-        data = path.read_bytes()
-        suffix = path.suffix.lower().lstrip(".") or "png"
-        mime = "image/png" if suffix == "png" else f"image/{suffix}"
-        return data, mime
+        from .imagelimits import read_image_bytes_bounded
 
-    with Image.open(path) as img:
-        img = img.convert("RGB")
-        w, h = img.size
-        scale = min(1.0, float(max_edge) / float(max(w, h, 1)))
-        if scale < 1.0:
-            img = img.resize(
-                (max(1, int(w * scale)), max(1, int(h * scale))),
-                Image.Resampling.LANCZOS,
-            )
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        return buf.getvalue(), "image/jpeg"
+        return read_image_bytes_bounded(path, max_bytes=max_bytes)
+
+    from .imagelimits import (
+        ImageLimitError,
+        check_file_bytes,
+        check_dimensions,
+    )
+
+    check_file_bytes(path, max_bytes)
+    try:
+        with Image.open(path) as img:
+            check_dimensions(img.size[0], img.size[1], max_pixels)
+            img = img.convert("RGB")
+            w, h = img.size
+            scale = min(1.0, float(max_edge) / float(max(w, h, 1)))
+            if scale < 1.0:
+                img = img.resize(
+                    (max(1, int(w * scale)), max(1, int(h * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return buf.getvalue(), "image/jpeg"
+    except ImageLimitError:
+        raise
+    except Exception as exc:
+        raise ImageLimitError(f"cannot decode image {path}: {exc}") from exc
 
 
 def chat_completion_with_image(
@@ -101,16 +120,42 @@ def chat_completion_with_image(
     timeout_s: float = 120.0,
     max_image_edge: int = 1600,
     temperature: float = 0.0,
+    max_image_bytes: int = 32 * 1024 * 1024,
+    max_image_pixels: int = 64_000_000,
+    max_upload_bytes: int = 8 * 1024 * 1024,
+    max_response_bytes: int = 4 * 1024 * 1024,
+    allow_remote: bool = False,
 ) -> str:
     """
     OpenAI-compatible multimodal chat completion.
 
     POST {base_url}/chat/completions with image as data URL.
+    Resource limits (WP-D1): file bytes and pixels capped before decode,
+    upload payload capped after encode, response body capped before parse.
+
+    E3 (I9, defense in depth): non-loopback endpoints are refused here
+    even if a caller forgets the extractor-level check — file bytes must
+    never leave the host without an explicit opt-in.
     """
+    from .extractors import _remote_blocked
+
+    blocked = _remote_blocked(base_url, allow_remote)
+    if blocked is not None:
+        raise RuntimeError(blocked)
     base = base_url.rstrip("/")
     url = f"{base}/chat/completions"
 
-    raw, mime = _resize_image_bytes(image_path, max_image_edge)
+    raw, mime = _resize_image_bytes(
+        image_path,
+        max_image_edge,
+        max_bytes=max_image_bytes,
+        max_pixels=max_image_pixels,
+    )
+    if len(raw) > max_upload_bytes:
+        raise RuntimeError(
+            f"image payload too large after resize: {len(raw)} bytes "
+            f"(limit {max_upload_bytes})"
+        )
     b64 = base64.b64encode(raw).decode("ascii")
     data_url = f"data:{mime};base64,{b64}"
 
@@ -148,6 +193,11 @@ def chat_completion_with_image(
     try:
         response = client.post(url, content=body, headers=headers)
         response.raise_for_status()
+        if len(response.content) > max_response_bytes:
+            raise RuntimeError(
+                f"perception response too large: {len(response.content)} "
+                f"bytes (limit {max_response_bytes})"
+            )
         data = response.json()
     except httpx.HTTPStatusError as exc:
         detail = exc.response.text[:500]
