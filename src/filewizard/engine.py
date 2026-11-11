@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+
+from .regexsafe import compile_pattern, safe_search
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -235,7 +237,7 @@ class Engine:
             return None
         name_nfc = _nfc(facts.filename)
         try:
-            if re.search(c.filename_regex, name_nfc, re.IGNORECASE):
+            if safe_search(compile_pattern(c.filename_regex, re.IGNORECASE), name_nfc):
                 return ConditionCheck(
                     key="filename",
                     passed=True,
@@ -557,7 +559,7 @@ class Engine:
             return None
         name_nfc = _nfc(facts.filename)
         try:
-            if re.search(c.not_filename_regex, name_nfc, re.IGNORECASE):
+            if safe_search(compile_pattern(c.not_filename_regex, re.IGNORECASE), name_nfc):
                 return ConditionCheck(
                     key="not_filename",
                     passed=False,
