@@ -368,8 +368,17 @@ class MainWindow(QMainWindow):
 
             from .update_check import UpdateCheckWorker
 
-            worker = UpdateCheckWorker(__version__, parent=self)
+            # No Qt parent: destroying a *running* QThread via the window
+            # is fatal ("shared QObject deleted directly"). We own the
+            # reference and reap it on finish (see below).
+            worker = UpdateCheckWorker(__version__)
             worker.notice_ready.connect(self._show_update_notice)
+
+            def _reap() -> None:
+                self._update_worker = None
+                worker.deleteLater()
+
+            worker.finished.connect(_reap)
             self._update_worker = worker
             worker.start()
         except Exception:
@@ -602,6 +611,12 @@ class MainWindow(QMainWindow):
         self.refresh_journal()
 
     def closeEvent(self, event) -> None:
+        # B5: never destroy a running update-check thread; wait briefly
+        # (the network call has a 5 s timeout, the fast paths return at
+        # once) so the QThread cannot outlive the window.
+        worker = self._update_worker
+        if worker is not None and worker.isRunning():
+            worker.wait(2000)
         if self.undo_worker is not None:
             from .util import abandon_busy_close
 
