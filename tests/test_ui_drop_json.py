@@ -10,18 +10,15 @@ import pytest
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QMimeData, QUrl
-from PySide6.QtWidgets import QApplication
 
 from click.testing import CliRunner
 
 
-@pytest.fixture()
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    yield app
+# Qt teardown is owned by pytest-qt's session-scoped qapp (qtbot):
+# a module-level QApplication([]) segfaults at interpreter shutdown.
 
 
-def test_drop_directory_opens_wizard_with_source(qapp, tmp_path) -> None:
+def test_drop_directory_opens_wizard_with_source(qtbot, tmp_path) -> None:
     from filewizard.ui.main_window import MainWindow
     from filewizard.ui.wizard import WizardDialog
 
@@ -55,7 +52,7 @@ def test_drop_directory_opens_wizard_with_source(qapp, tmp_path) -> None:
     win.close()
 
 
-def test_drop_ignores_non_directory(qapp, tmp_path) -> None:
+def test_drop_ignores_non_directory(qtbot, tmp_path) -> None:
     from filewizard.ui.main_window import MainWindow
 
     win = MainWindow(Path("~/.local/share/filewizard").expanduser())
@@ -82,7 +79,7 @@ def test_drop_ignores_non_directory(qapp, tmp_path) -> None:
     win.close()
 
 
-def test_drag_enter_accepts_directory(qapp, tmp_path) -> None:
+def test_drag_enter_accepts_directory(qtbot, tmp_path) -> None:
     from filewizard.ui.main_window import MainWindow
 
     win = MainWindow(Path("~/.local/share/filewizard").expanduser())

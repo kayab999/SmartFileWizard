@@ -48,9 +48,15 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("FileWizard")
         self.resize(960, 740)
 
-        # B5: deferred, non-blocking update check (QThread + signal).
+        # B5: deferred, non-blocking update check shortly after startup.
+        # The timer is parented to the window so it can never outlive it
+        # (a dangling singleShot invoking a destroyed wrapper aborts Qt).
         self._update_worker: Any = None
-        QTimer.singleShot(1500, self._start_update_check)
+        self._update_timer = QTimer(self)
+        self._update_timer.setSingleShot(True)
+        self._update_timer.setInterval(1500)
+        self._update_timer.timeout.connect(self._start_update_check)
+        self._update_timer.start()
 
         central = QWidget()
         self.setCentralWidget(central)

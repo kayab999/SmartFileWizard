@@ -13,13 +13,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QPushButton
 
 
-@pytest.fixture()
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    yield app
+# Qt teardown is owned by pytest-qt's session-scoped qapp (qtbot):
+# a module-level QApplication([]) segfaults at interpreter shutdown.
 
 
 def _make_window():
@@ -28,7 +26,7 @@ def _make_window():
     return MainWindow(Path("~/.local/share/filewizard").expanduser())
 
 
-def test_home_buttons_have_accessible_names(qapp) -> None:
+def test_home_buttons_have_accessible_names(qtbot) -> None:
     win = _make_window()
     missing = []
     for btn in win.findChildren(QPushButton):
@@ -40,7 +38,7 @@ def test_home_buttons_have_accessible_names(qapp) -> None:
     win.close()
 
 
-def test_toolbar_buttons_expose_roles(qapp) -> None:
+def test_toolbar_buttons_expose_roles(qtbot) -> None:
     win = _make_window()
     named = {
         btn.accessibleName()
@@ -52,7 +50,7 @@ def test_toolbar_buttons_expose_roles(qapp) -> None:
     win.close()
 
 
-def test_intent_cards_are_focusable(qapp) -> None:
+def test_intent_cards_are_focusable(qtbot) -> None:
     from filewizard.ui.widgets import IntentCard
 
     card = IntentCard("Organizar archivos", "desc")
@@ -61,7 +59,7 @@ def test_intent_cards_are_focusable(qapp) -> None:
     assert card.focusPolicy() != card.focusPolicy().NoFocus
 
 
-def test_preset_combo_has_accessible_name(qapp) -> None:
+def test_preset_combo_has_accessible_name(qtbot) -> None:
     win = _make_window()
     combo = win.preset_combo
     assert combo.accessibleName() or combo.toolTip()

@@ -12,10 +12,8 @@ from PySide6.QtCore import QTranslator
 from PySide6.QtWidgets import QApplication
 
 
-@pytest.fixture()
-def qapp():
-    app = QApplication.instance() or QApplication([])
-    yield app
+# Qt teardown is owned by pytest-qt's session-scoped qapp (qtbot):
+# a module-level QApplication([]) segfaults at interpreter shutdown.
 
 
 def test_qm_file_exists() -> None:
@@ -25,23 +23,24 @@ def test_qm_file_exists() -> None:
     assert qm.is_file()
 
 
-def test_translator_loads_and_translates(qapp) -> None:
+def test_translator_loads_and_translates(qtbot) -> None:
     qm = Path(__file__).resolve().parents[1] / (
         "src/filewizard/ui/i18n/filewizard_en.qm"
     )
     translator = QTranslator()
     assert translator.load(str(qm))
+    qapp = QApplication.instance()
     qapp.installTranslator(translator)
     try:
         # MainWindow source strings are Spanish; EN translation expected.
         assert (
-            MainWindow_translate_quit(qapp) == "Quit"
+            MainWindow_translate_quit(qtbot) == "Quit"
         )
     finally:
         qapp.removeTranslator(translator)
 
 
-def MainWindow_translate_quit(qapp) -> str:
+def MainWindow_translate_quit(qtbot) -> str:
     from PySide6.QtWidgets import QPushButton
 
     from filewizard.ui.main_window import MainWindow
@@ -58,7 +57,7 @@ def MainWindow_translate_quit(qapp) -> str:
         win.close()
 
 
-def test_app_translator_wiring(qapp) -> None:
+def test_app_translator_wiring(qtbot) -> None:
     """The --lang path loads the right .qm file for the language."""
     installed: list[str] = []
 
