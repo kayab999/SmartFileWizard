@@ -22,7 +22,11 @@ from PySide6.QtWidgets import (
 
 from ..perception.config import (
     PROFILES,
+    CacheSettings,
+    CascadeSettings,
+    OcrSettings,
     PerceptionConfig,
+    VisionSettings,
     config_from_profile,
     default_config_path,
     load_perception_config,
@@ -283,7 +287,7 @@ class PerceptionSettingsDialog(QDialog):
             version=1,
             profile=profile if profile else None,
             heuristics=self.heuristics.isChecked(),
-            cascade={
+            cascade=CascadeSettings.model_validate({
                 "enabled": self.cascade_enabled.isChecked(),
                 "high_confidence": self.high_conf.value(),
                 "medium_confidence": self.med_conf.value(),
@@ -294,20 +298,20 @@ class PerceptionSettingsDialog(QDialog):
                 "enable_stage3": self.stage3.isChecked(),
                 "zeroshot_model": self.zeroshot_model.text().strip()
                 or "openai/clip-vit-base-patch32",
-            },
-            cache={
+            }),
+            cache=CacheSettings.model_validate({
                 "enabled": self.cache_enabled.isChecked(),
-            },
-            ocr={
+            }),
+            ocr=OcrSettings.model_validate({
                 "provider": self.ocr_provider.currentText(),
                 "base_url": self.ocr_url.text().strip(),
                 "model": self.ocr_model.text().strip(),
-            },
-            vision={
+            }),
+            vision=VisionSettings.model_validate({
                 "provider": self.vis_provider.currentText(),
                 "base_url": self.vis_url.text().strip(),
                 "model": self.vis_model.text().strip(),
-            },
+            }),
         )
 
     def _refresh_status(self, cfg: PerceptionConfig | None = None) -> None:

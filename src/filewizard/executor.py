@@ -1203,7 +1203,7 @@ def undo_operations(
                 if "displaced_path" in live.keys()
                 else None
             )
-            restore: dict[str, Any] = {"status": "no_displaced"}
+            restore = {"status": "no_displaced"}
             if displaced:
                 restore = _restore_displaced(
                     live, current, journal, original_op_id

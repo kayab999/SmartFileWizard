@@ -10,7 +10,7 @@ from typing import Any
 try:
     from PIL import Image
 except ImportError:
-    Image = None
+    Image = None  # type: ignore[assignment]
 
 from ..facts import IMAGE_EXTENSIONS
 

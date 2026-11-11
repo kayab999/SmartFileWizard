@@ -12,7 +12,7 @@ try:
     # Guard against absurdly large images.
     Image.MAX_IMAGE_PIXELS = 150_000_000
 except ImportError:
-    Image = None
+    Image = None  # type: ignore[assignment]
 
 
 @runtime_checkable

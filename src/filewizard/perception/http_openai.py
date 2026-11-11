@@ -33,17 +33,17 @@ def remote_perception_endpoints(config) -> list[str]:
     """
     remote: list[str] = []
     ocr = getattr(config, "ocr", None)
-    if (
+    if ocr is not None and (
         getattr(ocr, "provider", None) == "llama_http"
         and not host_is_loopback(str(getattr(ocr, "base_url", "")))
     ):
-        remote.append(f"OCR {ocr.base_url}")
+        remote.append(f"OCR {getattr(ocr, 'base_url', '')}")
     vision = getattr(config, "vision", None)
-    if (
+    if vision is not None and (
         getattr(vision, "provider", None) == "llama_http"
         and not host_is_loopback(str(getattr(vision, "base_url", "")))
     ):
-        remote.append(f"visión {vision.base_url}")
+        remote.append(f"visión {getattr(vision, 'base_url', '')}")
     return remote
 
 # H4 (0.9.4): single in-flight HTTP call process-wide. OCR/VLM servers are
@@ -92,11 +92,13 @@ def _resize_image_bytes(
 
     check_file_bytes(path, max_bytes)
     try:
-        with Image.open(path) as img:
-            check_dimensions(img.size[0], img.size[1], max_pixels)
-            img = img.convert("RGB")
-            w, h = img.size
+        with Image.open(path) as opened:
+            check_dimensions(opened.size[0], opened.size[1], max_pixels)
+            w, h = opened.size
             scale = min(1.0, float(max_edge) / float(max(w, h, 1)))
+            # convert/resize return a new Image; the context-manager
+            # ImageFile is dropped at the end of the with block.
+            img: Image.Image = opened.convert("RGB")
             if scale < 1.0:
                 img = img.resize(
                     (max(1, int(w * scale)), max(1, int(h * scale))),

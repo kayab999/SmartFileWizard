@@ -37,7 +37,6 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,5 +44,5 @@ jobs:
           python-version: "3.11"
       - name: Install
         run: pip install -e ".[dev,ui]" mypy types-PyYAML
-      - name: Type check (informational)
-        run: mypy src/filewizard --ignore-missing-imports || true
+      - name: Type check (gate)
+        run: mypy src/filewizard --ignore-missing-imports

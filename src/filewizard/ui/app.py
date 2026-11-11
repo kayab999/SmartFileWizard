@@ -69,8 +69,9 @@ def main() -> None:
 
     window = MainWindow(state_dir=state_dir)
     accept_show_requests(primary, window)
-    tray = TrayIconManager(window)
-    window.tray_manager = tray if tray.attach() else None
+    tray_manager = TrayIconManager(window)
+    tray: TrayIconManager | None = tray_manager
+    window.tray_manager = tray if tray is not None and tray.attach() else None
 
     window.show()
     if splash is not None:

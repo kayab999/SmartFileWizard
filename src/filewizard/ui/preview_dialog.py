@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..executor import PlannedOperation, append_unique
-from ..facts import collect_facts
+from ..facts import FileFacts, collect_facts
 from ..template import render_path_template
 from .util import human_size, safe_display
 from .workers import ExecuteWorker
@@ -42,7 +42,10 @@ def load_thumbnail(path: Path, max_size: int = 320):
         original = reader.size()
         if original.isValid():
             reader.setScaledSize(
-                original.scaled(QSize(max_size, max_size), Qt.KeepAspectRatio)
+                original.scaled(
+                    QSize(max_size, max_size),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                )
             )
 
         image = reader.read()
@@ -65,7 +68,8 @@ class PreviewDialog(QDialog):
 
         self.path = path
         self.state_dir = state_dir
-        self.worker = None
+        self.worker: ExecuteWorker | None = None
+        self.facts: FileFacts | None = None
         self.moved_to = None
 
         self.setWindowTitle(safe_display(path.name))
@@ -75,7 +79,7 @@ class PreviewDialog(QDialog):
         content = QHBoxLayout()
 
         self.thumb_label = QLabel("Cargando…")
-        self.thumb_label.setAlignment(Qt.AlignCenter)
+        self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_label.setMinimumSize(340, 340)
 
         try:
@@ -84,7 +88,6 @@ class PreviewDialog(QDialog):
             self.facts = collect_facts(path, extractors=[ImageHeuristics()])
         except Exception:
             self.facts = None
-
         details = QFormLayout()
 
         if self.facts is not None:

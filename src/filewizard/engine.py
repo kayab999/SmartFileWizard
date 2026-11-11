@@ -805,10 +805,11 @@ class Engine:
             )
 
         if c.cascade_stage_max is not None:
-            try:
-                stage = int(cascade.get("stage_used"))
-            except (TypeError, ValueError):
+            raw_stage = cascade.get("stage_used")
+            if raw_stage is None:
                 stage = None
+            else:
+                stage = int(raw_stage)
             limit = int(c.cascade_stage_max)
             passed = stage is not None and stage <= limit
             checks.append(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +14,8 @@ from .extractors import (
     TesseractOcrExtractor,
 )
 from .http_openai import probe_server
+
+logger = logging.getLogger(__name__)
 
 
 def _maybe_wrap_cache(
@@ -33,6 +37,45 @@ def _maybe_wrap_cache(
     return [
         CachingExtractor(inner, cache, config_fp=fp) for inner in extractors
     ]
+
+
+# D3: plugin boundary. Third-party extractors register under the
+# ``filewizard.extractors`` entry-point group. Each entry point must expose
+# an object with ``name`` and ``extract(path)`` (FeatureExtractor protocol)
+# or a zero-argument factory returning one. Load failures are logged and
+# skipped — a broken plugin must not break the perception stack.
+PLUGIN_ENTRY_POINT_GROUP = "filewizard.extractors"
+
+
+def load_plugin_extractors(group: str = PLUGIN_ENTRY_POINT_GROUP) -> list[Any]:
+    """Instantiate registered third-party extractors (best-effort)."""
+    out: list[Any] = []
+    try:
+        eps = entry_points(group=group)
+    except TypeError:  # Python 3.9 fallback API
+        eps = list(  # type: ignore[assignment]
+            ep for ep in entry_points() if ep.group == group
+        )
+    for ep in eps:
+        try:
+            obj = ep.load()
+            # A class is a factory; an instance is passed through as-is;
+            # any other callable without extract() is a zero-arg factory.
+            if isinstance(obj, type):
+                instance = obj()
+            elif callable(obj) and not hasattr(obj, "extract"):
+                instance = obj()
+            else:
+                instance = obj
+            if not hasattr(instance, "extract"):
+                logger.warning(
+                    "plugin %r has no extract(); skipped", ep.name
+                )
+                continue
+            out.append(instance)
+        except Exception as exc:
+            logger.warning("plugin %r failed to load: %s", ep.name, exc)
+    return out
 
 
 def build_extractors(
@@ -118,6 +161,10 @@ def build_extractors(
         extractors.append(
             LlamaHttpVisionExtractor(cfg.vision, allow_remote=cfg.allow_remote)
         )
+
+    # D3: third-party plugins registered via entry points go last
+    # (agent/review-label injectors, added by callers, stay after these).
+    extractors.extend(load_plugin_extractors())
 
     return _maybe_wrap_cache(extractors, cfg, state_dir=state_dir)
 

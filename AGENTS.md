@@ -91,6 +91,8 @@ FileWizard is a **local-first, rule-based file classification and organization e
 | **0.10.0** | Remediation + sharpening: invoice-spoof fix, canonical reverse map, jail extendido, paridad MCP, CI/ruff, cascada medium, review roundtrip, aviso remoto, foco/SR, memo cache, retención/purga, single-source |
 | **0.10.1** | Audit Fase 1: screenshot spoof→probable; MCP limit cap; atomic presets/export; docs |
 | **0.11.0** | Preset downloads-docs; review labels inject on next plan; older_than_days / aspect; Linux .desktop |
+| **0.11.1** | Integrity remediation F-01…F-18 + A-01…A-06; chunked hashing; safe publication (fsmove); regexsafe; pathsafe |
+| **0.11.2** | P0–P4 phases: batch stage-1 inference; parallel fact pipeline (`--workers`); prompt i18n; Qt i18n (en .qm); a11y; drag&drop; `--json` schemas; `filewizard.api` v1.0; plugin entry points; mypy gate; coverage gate; cosign/SBOM/Flatpak/reproducible; journal quota; GUI update notice |
 
 ### 2.3 Explicit non-goals (do not implement unless asked)
 
@@ -108,8 +110,9 @@ FileWizard is a **local-first, rule-based file classification and organization e
 0.9   Runtime hardening (AUDIT_0.9.md) → SHIPPED 0.9.0
 0.10  Remediación integral + afilado → SHIPPED 0.10.0 / 0.10.1
 0.11  Downloads-docs + cola→labels + desktop + AppImage/.deb → SHIPPED 0.11.0
-0.11+ Integrity remediation (F-01…F-18): WPs A/B/C/D/E, no release until gates pass
-0.12  Extra backends / daemon / Flatpak
+0.11+ Integrity remediation (F-01…F-18): WPs A/B/C/D/E, no release until gates pass  → SHIPPED 0.11.1
+0.11.2 Score-raise phases P0–P4 (batch/parallel/i18n/a11y/API/gates)    → SHIPPED
+0.12  Extra backends / daemon / Flatpak build validation                → next
 ```
 
 **Executable breakdown for DeepSeek:** [docs/WORK_PLAN.md](docs/WORK_PLAN.md)  
@@ -126,7 +129,9 @@ filewizard --help
 # GUI (needs display): filewizard-ui
 ```
 
-Expect **394** unit tests passing (post-remediation F-01…F-18 + A-01…A-06 baseline; see WORK_PLAN remediation table).
+Expect **438** unit tests passing (P0–P4 phase complete: batch inference,
+parallel pipeline, i18n/a11y, plugin entry points, mypy + coverage gates;
+see WORK_PLAN remediation table and docs/NEXT_PHASES_PLAN.md).
 
 ---
 
@@ -196,6 +201,14 @@ Path
 | CLI | `src/filewizard/cli.py` | `run`, `undo`, `ui`, `presets`, `perception`, `watch` (once/list/add/remove/run), `verify`, `reset` |
 | Watcher | `src/filewizard/watch.py` | `WatchConfig`, `watch_once`, `watch_loop`, debounce `watch_state.json`, pid lock, active watches |
 | Atomic persist | `src/filewizard/persist.py` | `atomic_write_text` (tmp + replace) for JSON/YAML state |
+| Safe publish | `src/filewizard/fsmove.py` | Atomic no-replace primitives, EXDEV publication, metadata-preserving copy |
+| Regex engine | `src/filewizard/regexsafe.py` | Bounded regex (ADR-0006): `regex` extra + stdlib/SIGALRM fallback |
+| Path safety | `src/filewizard/pathsafe.py` | `secure_resolve` (O_NOFOLLOW per component) for MCP jail |
+| Identity | `src/filewizard/identity.py` | `FileIdentity` (size/mtime/dev/ino, chunked SHA-256 all sizes); `identity_matches`, `content_matches`, `pid_alive` |
+| Public API | `src/filewizard/api.py` | `filewizard.api` versioned surface (`API_VERSION`, `plan/execute/undo`) |
+| Doctor | `src/filewizard/doctor.py` | `doctor_report` environment diagnostics |
+| Benchmark | `src/filewizard/benchmark.py` | `benchmark_directory` reproducible throughput |
+| Update check | `src/filewizard/update.py` | GitHub Releases notice (`filewizard update`, GUI notice) |
 | Heuristics | `src/filewizard/plugins/heuristics.py` | EXIF, patterns, palette |
 | OCR legacy | `src/filewizard/plugins/ocr.py` | Thin / legacy path |
 | Vision legacy | `src/filewizard/plugins/vision.py` | Stub / legacy |
@@ -458,6 +471,12 @@ filewizard-ui
 | [docs/AUDIT_0.8.md](docs/AUDIT_0.8.md) | 0.8 findings (remediated) |
 | [docs/AUDIT_0.9.md](docs/AUDIT_0.9.md) | 0.9 runtime findings (remediated) |
 | [docs/AUDIT_REMEDIATION_0.11.1.md](docs/AUDIT_REMEDIATION_0.11.1.md) | F-01…F-18 + A-01…A-06 remediation report |
+| [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Security threat model (STRIDE + trust boundaries) |
+| [docs/API.md](docs/API.md) | `filewizard.api` public API reference |
+| [docs/DEPRECATION.md](docs/DEPRECATION.md) | Semver + deprecation policy |
+| [docs/CLI_JSON.md](docs/CLI_JSON.md) | `--json` output schemas |
+| [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Benchmark baseline + parallel/batch guidance |
+| [docs/NEXT_PHASES_PLAN.md](docs/NEXT_PHASES_PLAN.md) | P1–P4 work packages (executed through 0.11.2) |
 | [docs/PLAN_CASCADE.md](docs/PLAN_CASCADE.md) | Cascade design + status |
 | [docs/PLAN_PERCEPTION_PROVIDERS.md](docs/PLAN_PERCEPTION_PROVIDERS.md) | Provider contract |
 | [docs/ROBUSTNESS.md](docs/ROBUSTNESS.md) | R1–R15 |

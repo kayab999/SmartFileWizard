@@ -88,6 +88,7 @@ class ZeroShotClassifier:
                 exc,
             )
             self._model = AutoModel.from_pretrained(self.model_id, **load_kw)
+        assert self._model is not None
         self._model.to(dev)
         self._model.eval()
 

@@ -2,6 +2,36 @@
 
 All notable product versions. Format: Keep a Changelog (keep it short).
 
+## [0.11.2] — 2026-11-11
+
+### Score-raise phases P0–P4
+
+- **Performance (P1):** batched stage-1 inference (`predict_batch`,
+  `Stage1BatchQueue`, `cascade.stage1_batch_size`); parallel fact
+  collection in `plan_operations` (`workers`, near-linear scaling for
+  I/O-bound perception); cache hit/miss/eviction metrics
+  (`filewizard cache stats/purge`); benchmark baseline
+  (`filewizard benchmark`, `docs/PERFORMANCE.md`); EN/ES prompt
+  i18n (`prompt_language`).
+- **Distribution (P2):** cosign keyless signing + SHA256SUMS in release;
+  GPG signing (optional secret); CycloneDX SBOM; reproducible-build
+  epochs (`SOURCE_DATE_EPOCH`); PyPI trusted-publishing workflow;
+  buildable Flatpak manifest + AppStream metainfo; `filewizard update`
+  and non-blocking GUI update notice.
+- **UX / a11y / i18n (P3):** Qt i18n framework with English `.ts/.qm`
+  (home screen translated); accessibility smoke tests (accessible names
+  on every control); drag & drop of folders onto the home; `--json`
+  structured output for `run`, `undo`, `presets list`, `perception
+  status`, `doctor`, `watch list`, `verify` (`docs/CLI_JSON.md`).
+- **API & quality (P4):** `filewizard.api` v1.0 (versioned, semver,
+  `docs/API.md` + `docs/DEPRECATION.md`); plugin boundary via
+  `filewizard.extractors` entry points; mypy gate green and
+  blocking in CI; coverage gate raised 50% → 70% (actual ~79%);
+  `docs/THREAT_MODEL.md`; journal hard size quota
+  (`filewizard purge --max-rows`, F-16 closed).
+- **Security (E-batch):** bounded regex engine (`regex` extra) activated
+  in CI so the real per-call timeout path always runs (E4 closed).
+
 ## [0.11.1] — 2026-11-11
 
 ### Remediación F-01…F-18 + A-01…A-06 (ADR-0005) + R8

@@ -35,7 +35,9 @@ class WatchDialog(QDialog):
     def __init__(self, state_dir: Path, parent=None):
         super().__init__(parent)
         self.state_dir = state_dir
-        self.worker = None
+        from .workers import WatchTickWorker
+
+        self.worker: WatchTickWorker | None = None
         self.setWindowTitle("Vigilancia de carpetas")
         self.resize(720, 420)
 

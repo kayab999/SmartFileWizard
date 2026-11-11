@@ -227,7 +227,7 @@ def filewizard_list_presets(state_dir: Path | str | None = None) -> dict:
         if not root.is_dir():
             items = []
         else:
-            items = list_presets(state_dir)
+            items = list_presets(_state_root(state_dir))
     except Exception as exc:
         return result_error("filewizard_list_presets", str(exc))
 
@@ -360,7 +360,7 @@ _PAYLOADS: dict[str, Any] = {
 
 def _resolve_ruleset(
     preset: str | None,
-    rules: str | None,
+    rules: Path | str | None,
     state_dir: Path,
 ):
     """Exactly one of preset|rules (mirrors CLI run contract)."""
@@ -368,6 +368,7 @@ def _resolve_ruleset(
         raise ValueError("Specify exactly one of 'preset' or 'rules'.")
     if preset:
         return load_preset(str(preset), state_dir)
+    assert rules is not None
     return load_ruleset(Path(str(rules)).expanduser())
 
 

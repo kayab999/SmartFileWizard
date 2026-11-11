@@ -8,10 +8,10 @@ Build rules (or use a short wizard) to move and rename files safely: preview fir
 
 | | |
 |--|--|
-| **Version** | 0.11.1 |
+| **Version** | 0.11.2 |
 | **Python** | ≥ 3.11 |
 | **License** | MIT ([LICENSE](LICENSE)) |
-| **Download** | [Releases](https://github.com/kayab999/SmartFileWizard/releases/latest) — `FileWizard-0.11.1-x86_64.AppImage` |
+| **Download** | [Releases](https://github.com/kayab999/SmartFileWizard/releases/latest) — `FileWizard-0.11.2-x86_64.AppImage` |
 
 ---
 
@@ -62,7 +62,7 @@ It is **not** an AI-first product. Intelligence is optional; organization works 
 
 For most Linux users — one file, double-click to run.
 
-1. Go to **[Releases](https://github.com/kayab999/SmartFileWizard/releases/latest)** and download `FileWizard-0.11.1-x86_64.AppImage`.
+1. Go to **[Releases](https://github.com/kayab999/SmartFileWizard/releases/latest)** and download `FileWizard-0.11.2-x86_64.AppImage`.
 2. Make it executable and launch:
    ```bash
    chmod +x FileWizard-*.AppImage
@@ -75,7 +75,7 @@ For most Linux users — one file, double-click to run.
    - User data lives in `~/.local/share/filewizard/` (journal, presets, cache) — the AppImage itself is read-only.
    - The AppImage bundles Python, PySide6, Pillow and the FileWizard engine. Optional perception extras (`tesseract`, `llama-server`, zero-shot `torch`) are **not** bundled — see [Perception](#perception-stack-040--050) and `perception.example.yaml`.
 
-> **Build it yourself:** `bash packaging/appimage/build.sh` → `dist/FileWizard-0.11.1-x86_64.AppImage` (needs `PyInstaller` + `appimagetool`; see [`packaging/appimage/README.md`](packaging/appimage/README.md)).
+> **Build it yourself:** `bash packaging/appimage/build.sh` → `dist/FileWizard-0.11.2-x86_64.AppImage` (needs `PyInstaller` + `appimagetool`; see [`packaging/appimage/README.md`](packaging/appimage/README.md)).
 
 ### Option A2 — .deb (Debian/Ubuntu, optional)
 
@@ -83,7 +83,7 @@ For users who prefer a system package:
 
 ```bash
 # From Releases
-sudo dpkg -i filewizard_0.11.1_amd64.deb
+sudo dpkg -i filewizard_0.11.2_amd64.deb
 sudo apt-get install -f -y  # fix deps if needed (libgl1, libxcb, etc.)
 
 filewizard --help
@@ -92,7 +92,7 @@ filewizard-ui                # GUI — same engine as AppImage
 
 - Installs to `/opt/filewizard/` + symlinks in `/usr/bin` (`filewizard`, `filewizard-ui`, `filewizard-mcp`) and desktop entry `filewizard.desktop` → menu `FileWizard`.
 - Same XDG state: `~/.local/share/filewizard/` (not removed on `apt remove`).
-- Build it yourself: `bash packaging/deb/build-deb.sh` → `dist/filewizard_0.11.1_amd64.deb` (needs `PyInstaller` + `nfpm`; reuses `dist/FileWizard/` from AppImage).
+- Build it yourself: `bash packaging/deb/build-deb.sh` → `dist/filewizard_0.11.2_amd64.deb` (needs `PyInstaller` + `nfpm`; reuses `dist/FileWizard/` from AppImage).
 
 ### Option B — From source (developers / pip)
 
@@ -331,7 +331,7 @@ pytest -q
 
 ```bash
 bash packaging/appimage/build.sh          # needs PyInstaller + appimagetool
-ls -lh dist/FileWizard-0.11.1-x86_64.AppImage
+ls -lh dist/FileWizard-0.11.2-x86_64.AppImage
 ./dist/FileWizard-*.AppImage --help
 
 bash packaging/deb/build-deb.sh           # needs PyInstaller payload + nfpm → dist/*.deb
@@ -362,7 +362,7 @@ See **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 | **0.7** | **Shipped:** MCP server — 9 tools over stdio; plan/execute/undo + agent labels (confirm-gated) |
 | **0.8** | **Shipped:** MCP uses perception; UX (badge, evidence, watch, catalog, review export) |
 | **0.9+** | Extra backends, daemon/inotify | 
-| **0.11** | **Shipped:** AppImage (`FileWizard-0.11.1-x86_64.AppImage`) + `.deb` (`filewizard_0.11.1_amd64.deb`), `.desktop` + hicolor icon |
+| **0.11** | **Shipped:** AppImage (`FileWizard-0.11.2-x86_64.AppImage`) + `.deb` (`filewizard_0.11.2_amd64.deb`), `.desktop` + hicolor icon |
 
 ---
 

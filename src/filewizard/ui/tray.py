@@ -98,7 +98,9 @@ class TrayIconManager:
 
     def quit_app(self) -> None:
         setattr(self.window, "_force_quit", True)
-        QApplication.instance().quit()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _open_watch(self) -> None:
         self.show_window()

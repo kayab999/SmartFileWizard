@@ -295,7 +295,7 @@ class CascadeExtractor:
             vision = VisionSettings.model_validate(vision)
 
         allow_remote = bool(getattr(config, "allow_remote", False))
-        self._ocr = None
+        self._ocr: LlamaHttpOcrExtractor | TesseractOcrExtractor | None = None
         if ocr.provider == "llama_http":
             self._ocr = LlamaHttpOcrExtractor(ocr, allow_remote=allow_remote)
         elif ocr.provider == "tesseract":
@@ -391,6 +391,7 @@ class CascadeExtractor:
 
         ocr_text = ""
         if need_stage2:
+            assert self._ocr is not None  # need_stage2 implies stage-2 ready
             try:
                 ocr_out = self._ocr.extract(path)
                 ocr_block = ocr_out.get("ocr") or {}
@@ -458,6 +459,7 @@ class CascadeExtractor:
         )
 
         if need_stage3:
+            assert self._vlm is not None  # need_stage3 implies stage-3 ready
             try:
                 v_out = self._vlm.extract(path)
                 vision = v_out.get("vision") or {}

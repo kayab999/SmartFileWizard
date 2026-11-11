@@ -227,7 +227,9 @@ class Journal:
 
         self.conn.commit()
 
-        return int(cur.lastrowid)
+        row_id = cur.lastrowid
+        assert row_id is not None
+        return int(row_id)
 
     @staticmethod
     def parse_perception(row: Any) -> dict[str, Any] | None:

@@ -350,7 +350,7 @@ def _require_size(path: Path, recorded: object, role: str) -> str | None:
         actual = path.stat().st_size
     except OSError as exc:
         return f"cannot read size of {role} {path} ({exc})"
-    expected = int(recorded)
+    expected = int(str(recorded))
     if actual != expected:
         return f"{role} {path}: size {actual} does not match journal {expected}"
     return None

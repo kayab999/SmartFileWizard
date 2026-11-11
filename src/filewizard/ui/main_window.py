@@ -40,8 +40,8 @@ class MainWindow(QMainWindow):
         self.state_dir = state_dir
         self._batches: dict[str, Any] = {}
         self._last_batch_id: str | None = None
-        self.undo_worker = None
-        self.tray_manager = None
+        self.undo_worker: UndoWorker | None = None
+        self.tray_manager: Any = None
         self._force_quit = False
         self._tray_hint_shown = False
 
@@ -496,7 +496,7 @@ class MainWindow(QMainWindow):
         self._batches = {b["batch_id"]: b for b in batches}
         while self._batch_layout.count() > 1:
             item = self._batch_layout.takeAt(0)
-            widget = item.widget()
+            widget = item.widget() if item is not None else None
             if widget is not None:
                 widget.deleteLater()
 

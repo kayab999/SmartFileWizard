@@ -1232,16 +1232,12 @@ def watch_run(
         raise click.ClickException(f"No active watches in {state_dir}.")
 
     targets: list[ActiveWatch] = (
-        [next((w for w in watches if w.name == name), None)]
-        if name
-        else watches
+        [w for w in watches if w.name == name] if name else watches
     )
-    if name is not None and targets[0] is None:
+    if name is not None and not targets:
         raise click.ClickException(f"No active watch named {name!r}.")
 
     for watch in targets:
-        if watch is None:  # pragma: no cover - guarded above
-            continue
         dry = False if execute else watch.dry_run
         cfg = replace(watch.to_watch_config(state_dir), dry_run=dry)
         click.echo(f"[watch] running {watch.name!r} ({cfg.source}) "

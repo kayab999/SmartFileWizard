@@ -146,10 +146,10 @@ def scan_displaced(
         stem = path.stem
         if stem.isdigit():
             candidate = int(stem)
-            row = by_op.get(candidate)
-            if row is not None:
+            matched: dict[str, Any] | None = by_op.get(candidate)
+            if matched is not None:
                 op_id = candidate
-                status = str(row.get("status") or "")
+                status = str(matched.get("status") or "")
         report.entries.append(
             DisplacedEntry(
                 path=path,

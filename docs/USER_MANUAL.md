@@ -1,6 +1,6 @@
 # FileWizard — User Manual
 
-**Version:** 0.11.1  
+**Version:** 0.11.2  
 **Platform:** Linux (local-first)  
 **Audience:** Anyone who wants to organize, rename, or classify files without writing shell scripts.
 
@@ -29,7 +29,7 @@ FileWizard is **not** primarily an AI app. Intelligence (zero-shot, OCR, VLM) is
 
 ### Option A — AppImage (for end users, no Python needed)
 
-1. Download `FileWizard-0.11.1-x86_64.AppImage` from **[Releases](https://github.com/kayab999/SmartFileWizard/releases/latest)**.
+1. Download `FileWizard-0.11.2-x86_64.AppImage` from **[Releases](https://github.com/kayab999/SmartFileWizard/releases/latest)**.
 2. Make executable:
    ```bash
    chmod +x FileWizard-*.AppImage
@@ -41,13 +41,13 @@ FileWizard is **not** primarily an AI app. Intelligence (zero-shot, OCR, VLM) is
      Without FUSE: `./FileWizard-*.AppImage --appimage-extract-and-run --help`.
    - AppImage bundles Python + PySide6 + Pillow. Perception extras (Tesseract, `llama-server`, CLIP) remain host-installed and configured in `~/.local/share/filewizard/perception.yaml`.
 
-Build it yourself: `bash packaging/appimage/build.sh` → `dist/FileWizard-0.11.1-x86_64.AppImage` (see `packaging/appimage/README.md`).
+Build it yourself: `bash packaging/appimage/build.sh` → `dist/FileWizard-0.11.2-x86_64.AppImage` (see `packaging/appimage/README.md`).
 
 ### Option A2 — .deb (Debian/Ubuntu, system package)
 
 ```bash
 # From Releases
-sudo dpkg -i filewizard_0.11.1_amd64.deb
+sudo dpkg -i filewizard_0.11.2_amd64.deb
 sudo apt-get install -f -y  # only if deps missing (libgl1 etc.)
 filewizard --help
 filewizard-ui              # GUI — same engine as AppImage
@@ -55,7 +55,7 @@ filewizard-ui              # GUI — same engine as AppImage
 
 - Installs to `/opt/filewizard/` (`FileWizard` unified binary + `_internal/`) + shims `/usr/bin/filewizard*` + `filewizard.desktop` + hicolor icon.
 - Same XDG state `~/.local/share/filewizard/` (kept on `apt remove`; wipe with `filewizard reset --all --yes`).
-- Build it yourself: `bash packaging/deb/build-deb.sh` → `dist/filewizard_0.11.1_amd64.deb` (needs `PyInstaller` payload + `nfpm`; reuses `dist/FileWizard/` if present).
+- Build it yourself: `bash packaging/deb/build-deb.sh` → `dist/filewizard_0.11.2_amd64.deb` (needs `PyInstaller` payload + `nfpm`; reuses `dist/FileWizard/` if present).
 
 ### Option B — From source (developers)
 

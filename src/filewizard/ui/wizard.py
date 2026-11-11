@@ -64,7 +64,7 @@ class SourcePage(QWidget):
         self.source_edit = QLineEdit()
         self.source_edit.setAccessibleName("Carpeta origen")
         # C3: an intent can carry a pre-selected source (dropped folder).
-        if getattr(intent, "default_source", None) is not None:
+        if intent.default_source is not None:
             default_source = Path(intent.default_source)
         else:
             default_source = Path.home() / "Downloads"
@@ -739,7 +739,7 @@ class WizardDialog(QDialog):
 
         self.operations: list[Any] = []
         self.scanned = 0
-        self.worker = None
+        self.worker: PreviewWorker | ExecuteWorker | None = None
 
         self.setWindowTitle(intent.title)
         self.resize(1100, 720)

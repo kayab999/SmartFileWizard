@@ -2,6 +2,12 @@
 
 Stable entry points for embedding FileWizard in other applications.
 Prefer these over reaching into ``executor``/``journal`` directly.
+
+Contract (D4):
+- ``API_VERSION`` follows semver; breaking changes bump the MAJOR and are
+  announced in docs/DEPRECATION.md one MINOR release ahead.
+- Dry-run is the default everywhere; mutation requires ``dry_run=False``
+  (execute_operations) or ``execute=True`` (undo) — mirroring the CLI.
 """
 
 from __future__ import annotations
@@ -17,6 +23,10 @@ from .journal import Journal
 from .models import RuleSet
 from .pipeline import plan_operations
 from .scanner import iter_files
+
+# D4: versioned public API. Bump with semver rules; breaking changes
+# require a MAJOR bump and a DEPRECATION.md entry one MINOR before.
+API_VERSION = "1.0"
 
 
 def plan(
@@ -87,4 +97,12 @@ def deprecated(message: str):
     return decorator
 
 
-__all__ = ["plan", "execute_operations", "undo", "collect_facts", "iter_files", "deprecated"]
+__all__ = [
+    "API_VERSION",
+    "plan",
+    "execute_operations",
+    "undo",
+    "collect_facts",
+    "iter_files",
+    "deprecated",
+]

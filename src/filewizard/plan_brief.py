@@ -88,7 +88,8 @@ def _volume_line(apply: list) -> str:
     sizes = [getattr(op, "identity_size", None) for op in apply]
     count = f"{len(apply)} archivos"
     if sizes and all(size is not None for size in sizes):
-        return f"{count}, {_human_bytes(sum(int(size) for size in sizes))}"
+        total = sum(int(s) for s in sizes if isinstance(s, int))
+        return f"{count}, {_human_bytes(total)}"
     return count
 
 
