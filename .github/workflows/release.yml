@@ -83,9 +83,16 @@ jobs:
           ls -lh dist/sbom.json 2>/dev/null || true
 
       - name: Sign artifacts (optional GPG)
-        if: secrets.GPG_PRIVATE_KEY != ''
+        # `secrets` context is not allowed in step-level `if:`; guard inside
+        # the script instead. Skips cleanly when no key is configured.
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
-          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "No GPG_PRIVATE_KEY configured; skipping GPG signing."
+            exit 0
+          fi
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           for f in dist/*.AppImage dist/*.deb; do
             [ -f "$f" ] && gpg --batch --yes --detach-sign --armor "$f"
           done
