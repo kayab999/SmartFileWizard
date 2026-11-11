@@ -26,6 +26,10 @@ jobs:
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
+          # Dump the Python stack if the interpreter crashes at teardown
+          # (PySide6 shutdown-order segfaults have been observed on
+          # runners; the stack pinpoints the leaking QObject).
+          PYTHONFAULTHANDLER: 1
         run: pytest -q
   lint:
     runs-on: ubuntu-latest
