@@ -48,7 +48,7 @@
 
 New: `src/filewizard/fsmove.py`, `src/filewizard/displaced.py`, `src/filewizard/perception/imagelimits.py`, `docs/adr/ADR-0005-transactional-integrity.md`.
 Rewritten/substantial: `executor.py` (saga + R2 convergence fixes), `journal.py` (identity, states, reconcile + placeholder restore), `verify_batch.py` (causal), `review_queue.py` (flock + labels-before-queue), `persist.py` (durable atomic + 0600 clamp), `watch.py` (signatures, retry, flock, giveups JSONL), `perception/config.py` + `extractors.py` + `http_openai.py` (caps/validation), `mcp/tools.py` (batch_id, fail-closed jail, scan gate), `cli.py` (partial-scan gate, `displaced`, `watch giveups`), `models.py` (regex bound + heuristic), `pipeline.py` (identity_pre), `ui/workers.py` + `ui/wizard.py` (enqueue_note), `logsetup.py` (rollover perms).
-Docs: OPENCODE.md rewritten; WORK_PLAN remediation table; AGENTS.md baseline 358; CHANGELOG Unreleased; ADR-0005 (R1–R7 additions).
+Docs: OPENCODE.md rewritten; WORK_PLAN remediation table; AGENTS.md baseline 385; CHANGELOG Unreleased; ADR-0005 (R1–R7 additions).
 
 ## D. Tests
 
@@ -191,7 +191,27 @@ Demonstrated with real forked processes (not fakes):
 - New findings use new identifiers (F-19…F-27), no reused IDs.
 - Final suite: **385 passed, 0 failed**, ruff clean. Environment: Python 3.13.3, Linux. Skipped tests: 3 (unreadable-directory simulation under root). Full output saved to `/tmp/opencode/audit/pytest-final.txt`.
 
-## R7. Evidence delivery
+## R9. External review corrections (2026-11-11)
+
+### R9.1 — Atomic recovery paths (P1)
+- `Journal.reconcile_pending()` restore branch now uses `move_noreplace()` instead of `shutil.move()` after an `exists()` check.
+- `Executor.execute()` error compensation now uses `move_noreplace()` instead of `shutil.move()`.
+- No recovery/compensation path may replace a foreign object; all publication is atomic no-replace.
+
+### R9.2 — Large-file undo access (P1)
+- `Journal.last_successful_moves()` already includes `needs_verify` and `undo_partial`, so `filewizard undo` offers moves whose E1 evidence is unavailable. `undo_operations()` re-validates size/hash before moving.
+- Residual remains: without E1, undo is best-effort evidence and may be refused on size/hash mismatch.
+
+### R9.3 — CI evidence (P1)
+- `.github/workflows/test.yml` fallback `pip install -e ".[dev]"` removed; a failed UI install now fails the job.
+- Green CI on the pushed commit must be confirmed from GitHub Actions (local suite: 385 passed).
+
+### R9.4 — Documentation consistency (P2)
+- Test count normalized to 385 across report sections.
+- README/USER_MANUAL/RELEASE updated to 0.11.1.
+- Residuals table (F-16, watcher 3-attempt cap, queue timeout, needs_verify GUI, ReDoS) remains PARTIAL and is not presented as "no data loss".
+
+## R7. Evidence delivery:
 
 - **Full diff vs `d0b5738`** (including new files): regenerate with `git diff HEAD` plus `git ls-files --others --exclude-standard` (untracked). Bundle saved at `/tmp/opencode/audit/remediation-full.diff` (regenerate after any edit).
 - **ADR-0005 complete**: `docs/adr/ADR-0005-transactional-integrity.md` (R1–R7 additions appended).
@@ -200,7 +220,7 @@ Demonstrated with real forked processes (not fakes):
   ```
   cd "/home/carlos/file wizard"
   source .venv/bin/activate
-  python -m pytest -q -p no:cacheprovider   # 358 passed
+  python -m pytest -q -p no:cacheprovider   # 385 passed
   ruff check src/ tests/                      # All checks passed
   ```
 - **Git state**: see §G.

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import errno
 import os
-import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -658,9 +657,9 @@ class Executor:
                     and not op.destination.exists()
                 ):
                     try:
-                        shutil.move(str(backup_path), str(op.destination))
+                        move_noreplace(backup_path, op.destination)
                         self.journal.clear_displaced(op_id)
-                    except OSError:
+                    except (OSError, DestinationExistsError):
                         pass
                 elif backup_path is not None and not backup_path.is_file():
                     # Displacement intent with no backup: nothing was
