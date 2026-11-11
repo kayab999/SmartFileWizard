@@ -199,6 +199,13 @@ def cli() -> None:
     default=False,
     help="Show detailed match explanations.",
 )
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Emit a JSON array of planned operations instead of human text.",
+)
 def run(
     source: Path,
     rules: Path | None,
@@ -214,6 +221,7 @@ def run(
     allow_model_only: bool,
     allow_partial_scan: bool,
     verbose: bool,
+    json_output: bool,
 ) -> None:
     """Scan a directory and apply organization rules."""
 
@@ -285,14 +293,16 @@ def run(
             scan_errors=scan_errors,
         )
 
-        click.echo(f"Scanned files: {scanned}")
+        if not json_output:
+            click.echo(f"Scanned files: {scanned}")
         if scan_errors:
             click.echo(
                 f"Scan incomplete: {len(scan_errors)} path error(s).",
                 err=True,
             )
-        click.echo(f"Planned operations: {len(operations)}")
-        click.echo("")
+        if not json_output:
+            click.echo(f"Planned operations: {len(operations)}")
+            click.echo("")
 
         # WP-D5 (F-14): a destructive run over a partial scan could move
         # files while others were silently skipped — the plan is not the
@@ -309,7 +319,8 @@ def run(
             )
 
         for op in operations:
-            echo_operation(op, verbose=verbose)
+            if not json_output:
+                echo_operation(op, verbose=verbose)
 
         held = [op for op in operations if op.status == "needs-review"]
         if held:
@@ -347,8 +358,19 @@ def run(
                 )
 
         if not execute:
-            click.echo("")
-            click.echo("Dry run only. Re-run with --execute to apply changes.")
+            if json_output:
+                import json
+
+                from .mcp.tools import _op_to_dict
+
+                click.echo(
+                    json.dumps(
+                        [_op_to_dict(op) for op in operations], indent=2
+                    )
+                )
+            else:
+                click.echo("")
+                click.echo("Dry run only. Re-run with --execute to apply changes.")
             return
 
         if not operations:
@@ -365,14 +387,21 @@ def run(
 
         counts = Counter(op.status for op in results)
 
-        click.echo("")
-        click.echo("Execution summary:")
+        if not json_output:
+            click.echo("")
+            click.echo("Execution summary:")
+            for status, count in counts.items():
+                click.echo(f"  {status}: {count}")
+            click.echo("")
+            click.echo("Done. Use `filewizard undo` to revert executed moves.")
+        else:
+            import json
 
-        for status, count in counts.items():
-            click.echo(f"  {status}: {count}")
+            from .mcp.tools import _op_to_dict
 
-        click.echo("")
-        click.echo("Done. Use `filewizard undo` to revert executed moves.")
+            click.echo(
+                json.dumps([_op_to_dict(op) for op in results], indent=2)
+            )
 
 
 @cli.command("undo")
@@ -452,6 +481,44 @@ def undo(
 
         for status, count in counts.items():
             click.echo(f"  {status}: {count}")
+
+
+@cli.command("doctor")
+@click.option(
+    "--state-dir",
+    type=click.Path(path_type=Path),
+    default=Path("~/.local/share/filewizard").expanduser(),
+    help="State directory.",
+)
+def doctor_cmd(state_dir: Path) -> None:
+    """Diagnose the local FileWizard installation."""
+    from .doctor import doctor_report
+
+    report = doctor_report(state_dir)
+    click.echo(f"FileWizard {report['version']} — Python {report['python']}")
+    click.echo(f"State: {report['state_dir']}")
+    for check in report["checks"]:
+        status = "OK" if check["ok"] else "FAIL"
+        click.echo(f"  [{status}] {check['name']}: {check['detail']}")
+
+
+@cli.command("benchmark")
+@click.option(
+    "--source",
+    required=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Directory to benchmark.",
+)
+@click.option("--iterations", default=3, help="Benchmark iterations.")
+@click.option("--limit", default=100, help="Max files per iteration.")
+def benchmark_cmd(source: Path, iterations: int, limit: int) -> None:
+    """Measure plan throughput on a directory."""
+    from .benchmark import benchmark_directory
+
+    report = benchmark_directory(source, iterations=iterations, limit=limit)
+    click.echo(f"Files: {report['files']}  Iterations: {report['iterations']}")
+    click.echo(f"Avg seconds: {report['avg_seconds']:.3f}")
+    click.echo(f"Files/s: {report['files_per_second']:.1f}")
 
 
 @cli.command("verify")
@@ -1085,6 +1152,55 @@ def presets_show(name: str, state_dir: Path) -> None:
 @cli.group("perception")
 def perception_cmd() -> None:
     """Configure and probe OCR / vision providers."""
+
+
+@perception_cmd.group("cache")
+def perception_cache() -> None:
+    """Inspect and purge the perception feature cache."""
+
+
+@perception_cache.command("stats")
+@click.option(
+    "--state-dir",
+    type=click.Path(path_type=Path),
+    default=Path("~/.local/share/filewizard").expanduser(),
+    help="State directory.",
+)
+def cache_stats(state_dir: Path) -> None:
+    """Show perception cache statistics."""
+    from .perception.cache import PerceptionCache
+
+    cache = PerceptionCache(state_dir)
+    entries = list(cache.index.items())
+    total = cache._payload_bytes()
+    click.echo(f"Cache dir: {cache.cache_dir}")
+    click.echo(f"Entries: {len(entries)}")
+    click.echo(f"Payload: {total} bytes")
+    if entries:
+        oldest = min(entries, key=lambda kv: kv[1])
+        newest = max(entries, key=lambda kv: kv[1])
+        click.echo(f"Oldest: {oldest[0]}")
+        click.echo(f"Newest: {newest[0]}")
+
+
+@perception_cache.command("purge")
+@click.option(
+    "--state-dir",
+    type=click.Path(path_type=Path),
+    default=Path("~/.local/share/filewizard").expanduser(),
+    help="State directory.",
+)
+@click.option("--yes", is_flag=True, help="Do not ask for confirmation.")
+def cache_purge(state_dir: Path, yes: bool) -> None:
+    """Delete all perception cache entries."""
+    from .perception.cache import PerceptionCache
+
+    cache = PerceptionCache(state_dir)
+    if not yes and not click.confirm("Delete all cache entries?"):
+        click.echo("Aborted.")
+        return
+    removed = cache.clear()
+    click.echo(f"Removed {removed} cache entries.")
 
 
 @perception_cmd.command("status")
