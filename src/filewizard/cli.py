@@ -1225,16 +1225,12 @@ def cache_stats(state_dir: Path) -> None:
     from .perception.cache import PerceptionCache
 
     cache = PerceptionCache(state_dir)
-    entries = list(cache.index.items())
-    total = cache._payload_bytes()
-    click.echo(f"Cache dir: {cache.cache_dir}")
-    click.echo(f"Entries: {len(entries)}")
-    click.echo(f"Payload: {total} bytes")
-    if entries:
-        oldest = min(entries, key=lambda kv: kv[1])
-        newest = max(entries, key=lambda kv: kv[1])
-        click.echo(f"Oldest: {oldest[0]}")
-        click.echo(f"Newest: {newest[0]}")
+    stats = cache.stats()
+    click.echo(f"Cache dir: {cache.root}")
+    click.echo(f"Entries: {stats['entries']}")
+    click.echo(f"Payload: {stats['payload_bytes']} bytes")
+    click.echo(f"Hits: {stats['hits']}  Misses: {stats['misses']}")
+    click.echo(f"Evictions: {stats['evictions']}")
 
 
 @perception_cache.command("purge")

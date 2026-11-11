@@ -73,6 +73,9 @@ class PerceptionCache:
         self.max_bytes = max(1, max_bytes)
         self._index_path = self.root / "index.json"
         self._index: dict[str, float] = self._load_index()
+        self._evictions = 0
+        self._hits = 0
+        self._misses = 0
 
     def _load_index(self) -> dict[str, float]:
         if not self._index_path.is_file():
@@ -98,16 +101,20 @@ class PerceptionCache:
 
     def get(self, key: str) -> dict[str, Any] | None:
         path = self.root / f"{key}.json"
-        if not path.is_file():
+        if not path.is_file() or key not in self._index:
+            self._misses += 1
             return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
+                self._misses += 1
                 return None
             self._index[key] = time.time()
+            self._hits += 1
             return data
         except Exception as exc:
             logger.debug("cache get failed for %s: %s", key, exc)
+            self._misses += 1
             return None
 
     def put(self, key: str, features: dict[str, Any]) -> None:
@@ -158,6 +165,7 @@ class PerceptionCache:
         except OSError:
             pass
         self._index.pop(key, None)
+        self._evictions += 1
 
     def _evict_if_needed(self) -> None:
         ordered = sorted(self._index.items(), key=lambda kv: kv[1])
@@ -171,6 +179,15 @@ class PerceptionCache:
                 break
             key, _ = ordered.pop(0)
             self._drop_key(key)
+
+    def stats(self) -> dict[str, int]:
+        return {
+            "entries": len(self._index),
+            "payload_bytes": self._payload_bytes(),
+            "hits": self._hits,
+            "misses": self._misses,
+            "evictions": self._evictions,
+        }
 
     def clear(self) -> int:
         n = 0

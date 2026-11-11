@@ -6,6 +6,8 @@ Prefer these over reaching into ``executor``/``journal`` directly.
 
 from __future__ import annotations
 
+import warnings
+
 from pathlib import Path
 from typing import Any
 
@@ -70,4 +72,19 @@ def undo(
         return undo_operations(journal, rows, dry_run=not execute)
 
 
-__all__ = ["plan", "execute_operations", "undo", "collect_facts", "iter_files"]
+def deprecated(message: str):
+    """Mark a public API as deprecated (emits DeprecationWarning)."""
+
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            warnings.warn(message, DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
+
+        wrapper.__name__ = func.__name__
+        wrapper.__doc__ = func.__doc__
+        return wrapper
+
+    return decorator
+
+
+__all__ = ["plan", "execute_operations", "undo", "collect_facts", "iter_files", "deprecated"]
