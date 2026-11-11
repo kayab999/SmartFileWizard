@@ -1642,6 +1642,11 @@ def test_watcher_signature_catches_in_place_rewrite(tmp_path) -> None:
     prev = {str(p.resolve()): list(s) for p, s in snapshot(src).items()}
 
     # In-place rewrite, same length, mtime restored.
+    # Sleep so ctime (second-granularity on some FS) differs between the
+    # two snapshots; ctime cannot be set from userspace on Linux.
+    import time
+
+    time.sleep(1.1)
     with f.open("r+b") as fh:
         fh.write(b"BBBB")
     os.utime(f, ns=(st0.st_atime_ns, st0.st_mtime_ns))
