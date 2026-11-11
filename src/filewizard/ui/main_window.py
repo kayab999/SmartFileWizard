@@ -161,7 +161,14 @@ class MainWindow(QMainWindow):
         hbuttons = QHBoxLayout()
         refresh_btn = QPushButton("Refrescar")
         refresh_btn.clicked.connect(self.refresh_journal)
+        verify_btn = QPushButton("Verificar…")
+        verify_btn.setAccessibleName("Verificar operaciones needs_verify")
+        verify_btn.setToolTip(
+            "Comprueba causalidad y operaciones pendientes de verificación"
+        )
+        verify_btn.clicked.connect(self.run_verify)
         hbuttons.addWidget(refresh_btn)
+        hbuttons.addWidget(verify_btn)
         hbuttons.addStretch()
 
         hlayout.addWidget(self.banner)
@@ -181,6 +188,21 @@ class MainWindow(QMainWindow):
         self.refresh_presets()
         self.refresh_journal()
         self.refresh_review_badge()
+
+    def run_verify(self) -> None:
+        journal = Journal(self.state_dir / "journal.db")
+        try:
+            rows = journal.recent_operations(100)
+        finally:
+            journal.close()
+        needs = [r for r in rows if str(r["status"]) == "needs_verify"]
+        text = (
+            f"Operaciones recientes: {len(rows)}\\n"
+            f"Pendientes de verificación: {len(needs)}\\n"
+            "Usa `filewizard verify --batch <id>` para un lote concreto."
+        )
+        QMessageBox.information(self, "FileWizard — Verificar", text)
+        self.refresh_journal()
 
     def quit_application(self) -> None:
         from PySide6.QtWidgets import QApplication
