@@ -18,6 +18,7 @@ import yaml
 from filewizard import __version__
 
 from ..executor import Executor, PlannedOperation, undo_operations
+from ..pathsafe import secure_resolve
 from ..facts import FeatureExtractor, collect_facts
 from ..journal import Journal
 from ..perception.inject import AgentFeaturesError, AgentFeaturesExtractor
@@ -134,13 +135,9 @@ def _has_symlink_component(path: Path) -> bool:
 def _path_within(path: Path, roots: list[Path]) -> bool:
     if not roots:
         return True
-    if _has_symlink_component(path):
-        return False
     try:
-        resolved = path.expanduser().resolve()
-    except OSError:
-        return False
-    if _has_symlink_component(resolved):
+        resolved = secure_resolve(path)
+    except (OSError, ValueError):
         return False
     return any(resolved == root or root in resolved.parents for root in roots)
 
@@ -211,12 +208,12 @@ def _apply_destination_jail(
             op.error = "destination contains a symlink component (fail-closed)"
             continue
         try:
-            dest = op.destination.expanduser().resolve()
-        except (OSError, RuntimeError) as exc:
+            dest = secure_resolve(op.destination)
+        except (OSError, ValueError) as exc:
             op.status = "error"
             op.error = f"destination cannot be resolved for jail check: {exc}"
             continue
-        if _has_symlink_component(dest) or not _path_within(dest, roots):
+        if not _path_within(dest, roots):
             op.status = "error"
             op.error = "destination outside allowed_roots"
 

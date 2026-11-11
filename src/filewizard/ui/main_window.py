@@ -190,18 +190,10 @@ class MainWindow(QMainWindow):
         self.refresh_review_badge()
 
     def run_verify(self) -> None:
-        journal = Journal(self.state_dir / "journal.db")
-        try:
-            rows = journal.recent_operations(100)
-        finally:
-            journal.close()
-        needs = [r for r in rows if str(r["status"]) == "needs_verify"]
-        text = (
-            f"Operaciones recientes: {len(rows)}\\n"
-            f"Pendientes de verificación: {len(needs)}\\n"
-            "Usa `filewizard verify --batch <id>` para un lote concreto."
-        )
-        QMessageBox.information(self, "FileWizard — Verificar", text)
+        from .verify_dialog import VerifyDialog
+
+        dialog = VerifyDialog(self.state_dir, parent=self)
+        dialog.exec()
         self.refresh_journal()
 
     def quit_application(self) -> None:

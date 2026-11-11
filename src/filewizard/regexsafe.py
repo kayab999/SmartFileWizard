@@ -1,18 +1,19 @@
-"""Bounded regex evaluation for untrusted rule patterns.
+"""Bounded regex evaluation for rule patterns.
 
-The standard-library ``re`` engine has no backtracking limit and no
-timeout. FileWizard rules are user-authored, but a pasted catastrophic
-pattern must not be able to hang the engine. This module prefers the
-optional ``regex`` package (which supports a per-call timeout) and falls
-back to ``re`` with the same API surface used by the engine.
+The stdlib ``re`` engine has no backtracking limit. We prefer the optional
+``regex`` package (per-call timeout) and fall back to ``re`` with a
+best-effort ``signal.SIGALRM`` guard on Unix main thread. On any timeout or
+error the pattern is treated as non-matching (fail-closed).
 """
 
 from __future__ import annotations
 
 import re
+import signal
+import threading
 from typing import Any
 
-try:  # Optional, declared in pyproject [redos]; not a core dependency.
+try:
     import regex as _regex  # type: ignore[import-not-found]
 
     _ENGINE = "regex"
@@ -28,6 +29,33 @@ def compile_pattern(pattern: str, flags: int = 0) -> Any:
     return re.compile(pattern, flags=flags)
 
 
+class _Timeout:
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+        self._old_handler = None
+        self._supported = (
+            _ENGINE == "re"
+            and hasattr(signal, "SIGALRM")
+            and threading.current_thread() is threading.main_thread()
+        )
+
+    def __enter__(self):
+        if self._supported:
+            self._old_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(signal.SIGALRM, _alarm_handler)
+            signal.setitimer(signal.ITIMER_REAL, self.seconds)
+        return self
+
+    def __exit__(self, *exc):
+        if self._supported:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, self._old_handler)
+
+
+def _alarm_handler(signum, frame):
+    raise TimeoutError("regex evaluation exceeded timeout")
+
+
 def safe_search(pattern: Any, text: str, *, timeout: float = 0.25) -> bool:
     """Return whether *pattern* matches *text*, bounded when possible."""
     if _ENGINE == "regex" and _regex is not None:
@@ -35,10 +63,9 @@ def safe_search(pattern: Any, text: str, *, timeout: float = 0.25) -> bool:
             return bool(pattern.search(text, timeout=timeout))
         except Exception:
             return False
-    # stdlib fallback: no timeout primitive; callers must also apply the
-    # heuristic in models._looks_catastrophic before reaching here.
     try:
-        return bool(pattern.search(text))
+        with _Timeout(timeout):
+            return bool(pattern.search(text))
     except Exception:
         return False
 

@@ -126,7 +126,7 @@ filewizard --help
 # GUI (needs display): filewizard-ui
 ```
 
-Expect **389** unit tests passing (post-remediation F-01…F-18 + A-01…A-06 baseline; see WORK_PLAN remediation table).
+Expect **394** unit tests passing (post-remediation F-01…F-18 + A-01…A-06 baseline; see WORK_PLAN remediation table).
 
 ---
 

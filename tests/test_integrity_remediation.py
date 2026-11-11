@@ -1409,8 +1409,6 @@ def test_jail_unresolvable_destination_is_error_not_skip(
     swallows ELOOP, so the OSError path is exercised with a targeted
     resolve failure (same failure mode as an ELOOP/permission error).
     """
-    import pathlib
-
     import filewizard.mcp.tools as tools_mod
     from filewizard.executor import PlannedOperation
     from filewizard.engine import ConditionCheck
@@ -1422,14 +1420,14 @@ def test_jail_unresolvable_destination_is_error_not_skip(
     monkeypatch.setenv("FILEWIZARD_SOURCE_ROOT", str(tmp_path))
     roots = tools_mod.mcp_allowed_roots()
 
-    real_resolve = pathlib.Path.resolve
+    real_secure = tools_mod.secure_resolve
 
-    def failing_resolve(self, strict=False):
-        if str(self) == str(unreachable / "x.txt"):
+    def failing_secure(path):
+        if str(path) == str(unreachable / "x.txt"):
             raise OSError(40, "Too many levels of symbolic links")
-        return real_resolve(self, strict=strict)
+        return real_secure(path)
 
-    monkeypatch.setattr(pathlib.Path, "resolve", failing_resolve)
+    monkeypatch.setattr(tools_mod, "secure_resolve", failing_secure)
 
     op = PlannedOperation(
         source=tmp_path / "a.txt",

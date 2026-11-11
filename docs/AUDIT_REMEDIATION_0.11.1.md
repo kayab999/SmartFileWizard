@@ -55,7 +55,7 @@ Docs: OPENCODE.md rewritten; WORK_PLAN remediation table; AGENTS.md baseline 385
 `tests/test_integrity_remediation.py` grew from 0 to **~110 tests** across WP sections. Final state:
 
 ```
-389 passed, 0 failed, ruff clean (src/ tests/)
+394 passed, 0 failed, ruff clean (src/ tests/)
 ```
 
 Real-subprocess suites: queue enqueue (2 procs), journal concurrency (2 procs), fsmove race (2 procs), crash-boundary matrix (6 boundaries × real `os._exit`). Known environment skips: 3 tests skip under root (unreadable-dir simulation impossible); branch-coverage tests for Python 3.13 `Path.resolve` ELOOP behavior are monkeypatched and documented in docstrings.
