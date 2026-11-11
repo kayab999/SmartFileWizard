@@ -645,6 +645,48 @@ class Journal:
         self.conn.commit()
         return int(cur.rowcount)
 
+    # F-16 (E2): hard size quota on top of the age-based policy. The quota
+    # only ever deletes the OLDEST PURGEABLE_STATUSES rows; undo evidence
+    # (`done`), unresolved (`pending`) and verification-required
+    # (`needs_verify`) rows are never evicted — the journal can grow, but it
+    # cannot lose recoverable work silently. Protected statuses are already
+    # outside PURGEABLE_STATUSES; the guard makes that invariant explicit.
+    QUOTA_PROTECTED_STATUSES = ("done", "pending", "needs_verify", "undo_partial")
+
+    def count_rows(self) -> int:
+        """Total number of journal rows (for quota checks)."""
+        cur = self.conn.execute("SELECT COUNT(*) FROM operations")
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def enforce_quota(self, *, max_rows: int = 100_000) -> int:
+        """Trim the journal to at most *max_rows* rows.
+
+        Deletes only the oldest purgeable rows (same statuses as ``purge``)
+        until the row count fits or nothing purgeable remains. Protected
+        statuses above are never deleted regardless of age. Returns the
+        number of rows removed.
+        """
+        if max_rows < 0:
+            raise ValueError("max_rows must be >= 0")
+        excess = self.count_rows() - max_rows
+        if excess <= 0:
+            return 0
+        placeholders = ",".join("?" for _ in self.PURGEABLE_STATUSES)
+        cur = self.conn.execute(
+            f"""
+            DELETE FROM operations WHERE id IN (
+                SELECT id FROM operations
+                WHERE status IN ({placeholders})
+                ORDER BY id ASC
+                LIMIT ?
+            )
+            """,
+            (*self.PURGEABLE_STATUSES, excess),
+        )
+        self.conn.commit()
+        return int(cur.rowcount)
+
     def close(self) -> None:
         self.conn.close()
 

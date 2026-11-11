@@ -211,6 +211,13 @@ def cli(lang: str | None) -> None:
     default=False,
     help="Emit a JSON array of planned operations instead of human text.",
 )
+@click.option(
+    "--workers",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Collect facts for N files concurrently (A2).",
+)
 def run(
     source: Path,
     rules: Path | None,
@@ -227,6 +234,7 @@ def run(
     allow_partial_scan: bool,
     verbose: bool,
     json_output: bool,
+    workers: int,
 ) -> None:
     """Scan a directory and apply organization rules."""
 
@@ -296,6 +304,7 @@ def run(
             on_fact_error=_on_fact_error,
             allow_model_only=allow_model_only,
             scan_errors=scan_errors,
+            workers=max(1, workers),
         )
 
         if not json_output:
@@ -623,6 +632,12 @@ def verify_cmd(ctx: click.Context, batch_id: str | None, state_dir: Path) -> Non
     help="Delete purgeable rows older than N days.",
 )
 @click.option(
+    "--max-rows",
+    type=int,
+    default=None,
+    help="Hard journal size quota: trim oldest purgeable rows to fit (F-16).",
+)
+@click.option(
     "--execute",
     is_flag=True,
     default=False,
@@ -637,6 +652,7 @@ def verify_cmd(ctx: click.Context, batch_id: str | None, state_dir: Path) -> Non
 def purge(
     state_dir: Path,
     older_than_days: int,
+    max_rows: int | None,
     execute: bool,
     yes: bool,
 ) -> None:
@@ -659,6 +675,18 @@ def purge(
             f"{older_than_days} days; done/pending kept)."
         )
 
+        if max_rows is not None:
+            if max_rows < 0:
+                raise click.ClickException("--max-rows must be >= 0.")
+            rows = journal.count_rows()
+            if rows > max_rows:
+                click.echo(
+                    f"Journal quota: {rows} rows > {max_rows}; "
+                    "oldest purgeable rows will be trimmed."
+                )
+            else:
+                click.echo(f"Journal quota: {rows} rows <= {max_rows}; OK.")
+
         if not execute:
             click.echo("")
             click.echo("Dry purge only. Re-run with --execute to delete.")
@@ -671,6 +699,8 @@ def purge(
             )
 
         removed = journal.purge(older_than_days=older_than_days)
+        if max_rows is not None:
+            removed += journal.enforce_quota(max_rows=max_rows)
         click.echo(f"Purged {removed} journal rows.")
 
 

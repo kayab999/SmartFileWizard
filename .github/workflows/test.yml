@@ -18,7 +18,9 @@ jobs:
       - name: Install
         # No fallback: a failed `ui` install must fail the job here, not
         # later as ModuleNotFoundError inside the test suite.
-        run: pip install -e ".[dev,ui]"
+        # `redos` activates the bounded `regex` engine (ADR-0006): CI runs
+        # the real-timeout path, not only the stdlib fallback.
+        run: pip install -e ".[dev,ui,redos]"
       - name: Test
         run: pytest -q
   lint:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable
+from collections import deque
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -143,6 +146,7 @@ def plan_operations(
     cancel: CancelToken | None = None,
     allow_model_only: bool = False,
     scan_errors: list[str] | None = None,
+    workers: int = 1,
 ) -> tuple[list[PlannedOperation], int]:
     """
     Shared scan → facts → match → plan pipeline used by CLI and UI.
@@ -151,6 +155,11 @@ def plan_operations(
     on_facts(facts): optional hook after collect_facts (review queue, telemetry)
     cancel: cooperative stop between files (CancelledError if triggered)
     allow_model_only: apply matches that depend only on model evidence
+    workers: >1 collects facts for that many files concurrently (A2).
+        Perception (OCR/VLM) dominates wall time; results are still consumed
+        strictly in scan order, so planning stays deterministic. The
+        pre-extractor identity capture (F-07) happens inside the same worker
+        task, before that file's extractors run.
     """
     if isinstance(rules, RuleSet):
         rule_list = list(rules.rules)
@@ -174,39 +183,77 @@ def plan_operations(
         if scan_errors is not None:
             scan_errors.append(f"{getattr(err, 'filename', '')}: {err}")
 
-    for path in iter_files(
-        source,
-        include_hidden=include_hidden,
-        on_error=_scan_error if scan_errors is not None else None,
-    ):
-        if resolved_only is not None and path.resolve() not in resolved_only:
-            continue
+    def _candidate_paths() -> Iterator[Path]:
+        for path in iter_files(
+            source,
+            include_hidden=include_hidden,
+            on_error=_scan_error if scan_errors is not None else None,
+        ):
+            if resolved_only is not None and path.resolve() not in resolved_only:
+                continue
+            if cancel is not None and cancel.is_cancelled():
+                raise CancelledError("Plan cancelled by user")
+            if limit is not None and scanned >= limit:
+                break
+            yield path
 
-        if cancel is not None and cancel.is_cancelled():
-            raise CancelledError("Plan cancelled by user")
+    # F-07 invariant inside the worker: identity is captured BEFORE any
+    # extractor for that same file runs (executor.plan re-checks it later).
+    def _task(path: Path) -> tuple[Any, Any]:
+        identity = capture_identity(path)
+        facts = collect_facts(path, extractors=extractor_list)
+        return identity, facts
 
-        if limit is not None and scanned >= limit:
-            break
+    def _facts() -> Iterator[tuple[Path, Any, Any]]:
+        """Yield (path, identity_pre, facts_or_exception) in scan order."""
+        if workers <= 1:
+            for path in _candidate_paths():
+                try:
+                    identity, facts = _task(path)
+                    yield path, identity, facts
+                except Exception as exc:
+                    yield path, None, exc
+            return
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            pending: deque[tuple[Path, Any]] = deque()
+            paths_iter = iter(_candidate_paths())
 
+            def _submit_next() -> bool:
+                try:
+                    path = next(paths_iter)
+                except StopIteration:
+                    return False
+                pending.append((path, pool.submit(_task, path)))
+                return True
+
+            for _ in range(max(1, workers)):
+                if not _submit_next():
+                    break
+            while pending:
+                if limit is not None and scanned >= limit:
+                    break
+                if cancel is not None and cancel.is_cancelled():
+                    raise CancelledError("Plan cancelled by user")
+                path, fut = pending.popleft()
+                try:
+                    identity, facts = fut.result()
+                    yield path, identity, facts
+                except Exception as exc:
+                    yield path, None, exc
+                _submit_next()
+
+    for path, identity_pre, result in _facts():
         scanned += 1
         if on_progress is not None:
             on_progress(scanned, limit)
 
-        # WP-B1 (F-07): capture the file identity BEFORE any extractor
-        # runs. Perception (OCR/vision/HTTP) can take long; a substitution
-        # during that window would otherwise let a decision built on the
-        # original's evidence move the substitute. executor.plan compares
-        # this against a fresh capture and refuses to plan on divergence.
-        identity_pre = capture_identity(path)
-
-        try:
-            facts = collect_facts(path, extractors=extractor_list)
-        except Exception as exc:
+        if isinstance(result, Exception):
             if on_fact_error is not None:
-                on_fact_error(path, exc)
+                on_fact_error(path, result)
             else:
-                logger.warning("collect_facts failed for %s: %s", path, exc)
+                logger.warning("collect_facts failed for %s: %s", path, result)
             continue
+        facts = result
 
         if on_facts is not None:
             on_facts(facts)

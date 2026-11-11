@@ -116,7 +116,9 @@ class LlamaHttpOcrExtractor:
             content = chat_completion_with_image(
                 base_url=self.settings.base_url,
                 model=self.settings.model,
-                prompt=ocr_user_prompt(),
+                prompt=ocr_user_prompt(
+                    language=self.settings.prompt_language
+                ),
                 image_path=path,
                 timeout_s=self.settings.timeout_s,
                 max_image_edge=self.settings.max_image_edge,
@@ -168,7 +170,10 @@ class LlamaHttpVisionExtractor:
             content = chat_completion_with_image(
                 base_url=self.settings.base_url,
                 model=self.settings.model,
-                prompt=vision_labels_prompt(self.settings.labels),
+                prompt=vision_labels_prompt(
+                    self.settings.labels,
+                    language=self.settings.prompt_language,
+                ),
                 image_path=path,
                 timeout_s=self.settings.timeout_s,
                 max_image_edge=self.settings.max_image_edge,

@@ -39,6 +39,8 @@ class OcrSettings(BaseModel):
     max_image_edge: int = 1600
     temperature: float = 0.0
     langs: str | None = None  # tesseract
+    # Prompt language for HTTP providers (A3: EN/ES prompt i18n).
+    prompt_language: Literal["en", "es"] = "en"
     max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES
     max_image_pixels: int = DEFAULT_MAX_IMAGE_PIXELS
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
@@ -98,6 +100,8 @@ class VisionSettings(BaseModel):
             "social",
         ]
     )
+    # Prompt language for HTTP providers (A3: EN/ES prompt i18n).
+    prompt_language: Literal["en", "es"] = "en"
     max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES
     max_image_pixels: int = DEFAULT_MAX_IMAGE_PIXELS
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
@@ -154,6 +158,8 @@ class CascadeSettings(BaseModel):
     zeroshot_model: str = "openai/clip-vit-base-patch32"
     # HuggingFace download of CLIP/SigLIP weights (can be hundreds of MB).
     allow_model_download: bool = False
+    # A1: images per zero-shot forward pass (>=2 enables batched stage 1).
+    stage1_batch_size: int = 1
 
     @field_validator(
         "high_confidence", "medium_confidence", "vlm_min_confidence"
@@ -171,6 +177,13 @@ class CascadeSettings(BaseModel):
             raise ValueError(
                 f"stage2_keyword_min_hits must be >= 0, got {v!r}"
             )
+        return v
+
+    @field_validator("stage1_batch_size")
+    @classmethod
+    def _v_batch_size(cls, v: int) -> int:
+        if not 1 <= v <= 64:
+            raise ValueError(f"stage1_batch_size must be 1..64, got {v!r}")
         return v
 
 

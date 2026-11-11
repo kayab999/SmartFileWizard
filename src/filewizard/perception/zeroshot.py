@@ -49,10 +49,12 @@ class ZeroShotClassifier:
         device: str | None = None,
         *,
         allow_download: bool = False,
+        batch_size: int = 1,
     ):
         self.model_id = model_id
         self.device = device
         self.allow_download = allow_download
+        self.batch_size = batch_size
         self._model = None
         self._processor = None
         self._torch = None
@@ -151,6 +153,79 @@ class ZeroShotClassifier:
         scored.sort(key=lambda x: x["score"], reverse=True)
         return scored
 
+    def predict_batch(
+        self,
+        paths: list[Path],
+        labels: list[str],
+    ) -> dict[Path, list[dict[str, Any]]]:
+        """Classify several images in batched forward passes (A1).
+
+        Results per path are identical to calling :meth:`predict`
+        individually (same softmax over the same label set); the win is
+        GPU/CPU throughput on the vision tower, not a different model.
+        """
+        from PIL import Image
+
+        self._ensure_loaded()
+        assert self._model is not None and self._processor is not None
+        torch = self._torch
+
+        results: dict[Path, list[dict[str, Any]]] = {}
+        texts = [LABEL_PROMPTS.get(lab, f"a photo of {lab}") for lab in labels]
+        paths = [Path(p) for p in paths]
+        for start in range(0, len(paths), max(1, self.batch_size)):
+            chunk = paths[start : start + self.batch_size]
+            images = [Image.open(p).convert("RGB") for p in chunk]
+            inputs = self._processor(
+                text=texts,
+                images=images,
+                return_tensors="pt",
+                padding=True,
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            with torch.no_grad():
+                if hasattr(self._model, "get_image_features"):
+                    image_features = self._model.get_image_features(
+                        **{
+                            k: v
+                            for k, v in inputs.items()
+                            if k.startswith("pixel")
+                        }
+                    )
+                    text_features = self._model.get_text_features(
+                        **{
+                            k: v
+                            for k, v in inputs.items()
+                            if k in ("input_ids", "attention_mask")
+                        }
+                    )
+                    image_features = image_features / image_features.norm(
+                        dim=-1, keepdim=True
+                    )
+                    text_features = text_features / text_features.norm(
+                        dim=-1, keepdim=True
+                    )
+                    # [n_images, n_labels]
+                    logits = (image_features @ text_features.T) * 100.0
+                    probs = logits.softmax(dim=-1)
+                else:
+                    outputs = self._model(**inputs)
+                    logits = getattr(outputs, "logits_per_image", None)
+                    if logits is None:
+                        raise RuntimeError(
+                            f"Model {self.model_id} does not expose "
+                            "CLIP-like scores"
+                        )
+                    probs = logits.softmax(dim=-1)
+            for row, path in enumerate(chunk):
+                scored = [
+                    {"label": labels[i], "score": float(probs[row, i].item())}
+                    for i in range(len(labels))
+                ]
+                scored.sort(key=lambda x: x["score"], reverse=True)
+                results[path] = scored
+        return results
+
 
 def hf_load_kwargs(*, allow_download: bool) -> dict[str, bool]:
     """HuggingFace from_pretrained flags. Download is opt-in (no silent GB)."""
@@ -171,3 +246,72 @@ def make_zeroshot_fn(
         return clf.predict(path, labels)
 
     return _fn
+
+
+def make_zeroshot_batch_fn(
+    model_id: str = "openai/clip-vit-base-patch32",
+    *,
+    allow_download: bool = False,
+    batch_size: int = 8,
+) -> Callable[[list[Path], list[str]], dict[Path, list[dict[str, Any]]]] | None:
+    """Return a batched zeroshot callable (A1) or None if deps missing."""
+    if not zeroshot_available():
+        return None
+    clf = ZeroShotClassifier(
+        model_id=model_id,
+        allow_download=allow_download,
+        batch_size=batch_size,
+    )
+
+    def _fn(
+        paths: list[Path], labels: list[str]
+    ) -> dict[Path, list[dict[str, Any]]]:
+        return clf.predict_batch(paths, labels)
+
+    return _fn
+
+
+class Stage1BatchQueue:
+    """Buffer stage-1 requests and evaluate them in model-sized batches.
+
+    The cascade works per file; this queue collects pending paths and, once
+    ``batch_size`` requests accumulate (or ``flush`` is called), evaluates
+    them in a single batched forward pass. Deterministic: results are handed
+    back per path in request order via ``result(path)``.
+    """
+
+    def __init__(
+        self,
+        classifier: ZeroShotClassifier,
+        labels: list[str],
+        *,
+        batch_size: int = 8,
+    ) -> None:
+        self.classifier = classifier
+        self.labels = list(labels)
+        self.batch_size = max(1, batch_size)
+        self._pending: list[Path] = []
+        self._results: dict[Path, list[dict[str, Any]]] = {}
+
+    def request(self, path: Path) -> list[dict[str, Any]] | None:
+        """Queue *path*; return its scores if already evaluated."""
+        path = Path(path)
+        if path in self._results:
+            return self._results[path]
+        if path not in self._pending:
+            self._pending.append(path)
+        if len(self._pending) >= self.batch_size:
+            self.flush()
+            return self._results.get(path)
+        return None
+
+    def flush(self) -> None:
+        """Evaluate all pending paths in batched passes."""
+        if not self._pending:
+            return
+        batch = self.classifier.predict_batch(self._pending, self.labels)
+        self._results.update(batch)
+        self._pending.clear()
+
+    def result(self, path: Path) -> list[dict[str, Any]] | None:
+        return self._results.get(Path(path))
