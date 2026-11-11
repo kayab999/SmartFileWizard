@@ -429,11 +429,19 @@ def run(
     default=False,
     help="Do not ask for confirmation.",
 )
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Emit JSON instead of human text.",
+)
 def undo(
     state_dir: Path,
     limit: int,
     execute: bool,
     yes: bool,
+    json_output: bool,
 ) -> None:
     """Undo moves recorded in the journal."""
 
@@ -447,19 +455,43 @@ def undo(
         rows = journal.last_successful_moves(limit=limit)
 
         if not rows:
-            click.echo("No completed move operations found.")
+            if json_output:
+                import json
+
+                click.echo(json.dumps([]))
+            else:
+                click.echo("No completed move operations found.")
             return
 
-        click.echo(f"Found {len(rows)} completed move operations.")
+        if json_output:
+            import json
 
-        for row in rows:
             click.echo(
-                f"[{row['id']}] {row['source']} -> {row['destination']}"
+                json.dumps(
+                    [
+                        {
+                            "id": row["id"],
+                            "source": str(row["source"]),
+                            "destination": str(row["destination"]),
+                        }
+                        for row in rows
+                    ]
+                )
             )
+            if not execute:
+                return
+
+        if not json_output:
+            click.echo(f"Found {len(rows)} completed move operations.")
+            for row in rows:
+                click.echo(
+                    f"[{row['id']}] {row['source']} -> {row['destination']}"
+                )
 
         if not execute:
-            click.echo("")
-            click.echo("Dry undo only. Re-run with --execute to revert changes.")
+            if not json_output:
+                click.echo("")
+                click.echo("Dry undo only. Re-run with --execute to revert changes.")
             return
 
         if not yes:
@@ -476,11 +508,15 @@ def undo(
 
         counts = Counter(result["status"] for result in results)
 
-        click.echo("")
-        click.echo("Undo summary:")
+        if json_output:
+            import json
 
-        for status, count in counts.items():
-            click.echo(f"  {status}: {count}")
+            click.echo(json.dumps(results, default=str))
+        else:
+            click.echo("")
+            click.echo("Undo summary:")
+            for status, count in counts.items():
+                click.echo(f"  {status}: {count}")
 
 
 @cli.command("doctor")

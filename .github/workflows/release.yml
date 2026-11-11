@@ -62,12 +62,24 @@ jobs:
           cyclonedx-py environment --output-file dist/sbom.json || true
           ls -lh dist/sbom.json 2>/dev/null || true
 
+      - name: Sign artifacts (optional)
+        if: secrets.GPG_PRIVATE_KEY != ''
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          for f in dist/*.AppImage dist/*.deb; do
+            [ -f "$f" ] && gpg --batch --yes --detach-sign --armor "$f"
+          done
+          sha256sum dist/* > dist/SHA256SUMS
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.AppImage
+            dist/*.deb
             dist/sbom.json
+            dist/*.asc
+            dist/SHA256SUMS
           generate_release_notes: true
           fail_on_unmatched_files: false
 
