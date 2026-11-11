@@ -7,14 +7,26 @@ finish-args:
   - --share=ipc
   - --socket=fallback-x11
   - --socket=wayland
+  # FileWizard organizes the user's files: home read/write is required.
   - --filesystem=home
+  - --device=dri
 modules:
   - name: filewizard
     buildsystem: simple
     build-commands:
-      - pip3 install --prefix=/app .
+      # Core deps first (pinned), then the app without deps so pip does not
+      # try to reach the network beyond these known packages.
+      - pip3 install --no-compile --prefix=${FLATPAK_DEST}
+        click pydantic pyyaml httpx pillow
+      - pip3 install --no-deps --prefix=${FLATPAK_DEST} PySide6
+      - pip3 install --no-deps --prefix=${FLATPAK_DEST} .
+      # Desktop entry + AppStream metadata (Flathub requirements).
+      - install -Dm644 packaging/filewizard.desktop
+        ${FLATPAK_DEST}/share/applications/com.kayab.FileWizard.desktop
+      - install -Dm644 packaging/flatpak/com.kayab.FileWizard.metainfo.xml
+        ${FLATPAK_DEST}/share/metainfo/com.kayab.FileWizard.metainfo.xml
+      # Smoke check inside the build sandbox.
+      - python3 -c "import filewizard, filewizard.ui; print(filewizard.__version__)"
     sources:
       - type: dir
         path: ../..
-EOF
-echo done

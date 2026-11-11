@@ -34,6 +34,11 @@ echo "[build] ROOT=$ROOT"
 echo "[build] SPEC=$SPEC"
 echo "[build] DIST=$DIST"
 
+# Reproducible-builds best effort (B3): deterministic file mtimes when the
+# caller exports SOURCE_DATE_EPOCH; TZ=UTC normalizes timestamps.
+export TZ=UTC
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then export SOURCE_DATE_EPOCH=1735689600; fi
+
 # --- checks ---
 if [ ! -f "$SPEC" ]; then echo "ERROR: spec not found: $SPEC" >&2; exit 1; fi
 if ! command -v python3 >/dev/null 2>&1; then echo "ERROR: python3 not found" >&2; exit 1; fi

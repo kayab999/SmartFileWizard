@@ -11,6 +11,8 @@ on:
 
 permissions:
   contents: write
+  # Keyless Sigstore signing (cosign) needs an OIDC token.
+  id-token: write
 
 jobs:
   # Verify before packaging — reuse the test matrix from test.yml but as a gate.
@@ -21,8 +23,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install (dev + ui; fallback to dev if Qt unavailable)
-        run: pip install -e ".[dev,ui]" || pip install -e ".[dev]"
+      - name: Install (dev + ui + bounded regex engine)
+        # Strict: no fallback — a failed Qt install must fail the release gate.
+        run: pip install -e ".[dev,ui,redos]"
       - name: pytest
         run: pytest -q
       - name: ruff
@@ -44,6 +47,10 @@ jobs:
           sudo apt-get install -y libfuse2 desktop-file-utils
 
       - name: Build AppImage
+        env:
+          # B2-3: reproducible-builds best effort — fixed epoch keeps file
+          # mtimes inside the bundle deterministic for identical inputs.
+          SOURCE_DATE_EPOCH: 1735689600
         run: |
           bash packaging/appimage/build.sh
           ls -lh dist/*.AppImage
@@ -62,14 +69,23 @@ jobs:
           cyclonedx-py environment --output-file dist/sbom.json || true
           ls -lh dist/sbom.json 2>/dev/null || true
 
-      - name: Sign artifacts (optional)
+      - name: Sign artifacts (optional GPG)
         if: secrets.GPG_PRIVATE_KEY != ''
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
           for f in dist/*.AppImage dist/*.deb; do
             [ -f "$f" ] && gpg --batch --yes --detach-sign --armor "$f"
           done
-          sha256sum dist/* > dist/SHA256SUMS
+
+      - name: Sign artifacts (keyless cosign)
+        run: |
+          pip install --quiet cosign 2>/dev/null || true
+          curl -sSfL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+          chmod +x cosign
+          for f in dist/*.AppImage dist/*.deb; do
+            [ -f "$f" ] && ./cosign sign-blob --yes --output-signature "$f.sig" --output-certificate "$f.cert" "$f"
+          done
+          sha256sum dist/*.AppImage dist/*.deb dist/sbom.json 2>/dev/null > dist/SHA256SUMS || true
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -79,6 +95,8 @@ jobs:
             dist/*.deb
             dist/sbom.json
             dist/*.asc
+            dist/*.sig
+            dist/*.cert
             dist/SHA256SUMS
           generate_release_notes: true
           fail_on_unmatched_files: false
@@ -92,6 +110,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Build .deb (from PyInstaller one-dir)
+        env:
+          SOURCE_DATE_EPOCH: 1735689600
         run: |
           bash packaging/deb/build-deb.sh
           ls -lh dist/*.deb

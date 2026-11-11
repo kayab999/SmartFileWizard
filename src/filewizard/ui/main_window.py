@@ -4,6 +4,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -46,6 +47,10 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("FileWizard")
         self.resize(960, 740)
+
+        # B5: deferred, non-blocking update check (QThread + signal).
+        self._update_worker: Any = None
+        QTimer.singleShot(1500, self._start_update_check)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -297,6 +302,26 @@ class MainWindow(QMainWindow):
             mgr.set_state_alert()
         else:
             mgr.set_state_idle()
+
+    def _start_update_check(self) -> None:
+        """B5: non-blocking update check shortly after startup."""
+        if self._update_worker is not None:
+            return
+        try:
+            from .. import __version__
+
+            from .update_check import UpdateCheckWorker
+
+            worker = UpdateCheckWorker(__version__, parent=self)
+            worker.notice_ready.connect(self._show_update_notice)
+            self._update_worker = worker
+            worker.start()
+        except Exception:
+            self._update_worker = None
+
+    def _show_update_notice(self, notice: str) -> None:
+        # Status bar: non-intrusive; no modal dialogs on startup.
+        self.statusBar().showMessage(notice, 15000)
 
     def open_intent(self, intent) -> None:
         if self.tray_manager is not None:

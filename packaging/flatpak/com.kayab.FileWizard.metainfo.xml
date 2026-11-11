@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.kayab.FileWizard</id>
+  <name>FileWizard</name>
+  <summary>Rule-based local file organizer</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      FileWizard classifies and organizes files with deterministic local
+      rules. Perception models (OCR/vision) only provide evidence; rules
+      decide; a journal makes every move undoable. Dry-run by default.
+    </p>
+  </description>
+  <launchable type="desktop-id">filewizard.desktop</launchable>
+  <url type="homepage">https://github.com/kayab999/SmartFileWizard</url>
+  <url type="bugtracker">https://github.com/kayab999/SmartFileWizard/issues</url>
+  <releases>
+    <release version="0.11.1" date="2026-11-01">
+      <description>
+        <p>Integrity remediation, safe publication moves, bounded regex engine.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1" />
+</component>

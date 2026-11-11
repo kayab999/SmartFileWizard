@@ -16,6 +16,10 @@ STAGING="$ROOT/build/deb-root"
 echo "[deb] FileWizard $VERSION arch=$ARCH"
 echo "[deb] ROOT=$ROOT"
 
+# Reproducible-builds best effort (B3): fixed epoch + UTC mtimes.
+export TZ=UTC
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then export SOURCE_DATE_EPOCH=1735689600; fi
+
 # Ensure PyInstaller payload exists; build if missing
 if [ ! -d "$DIST/FileWizard" ]; then
   echo "[deb] dist/FileWizard not found — building via appimage --no-appimage ..."
