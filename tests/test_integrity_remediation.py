@@ -1666,8 +1666,14 @@ def test_watcher_signature_catches_same_name_substitution(tmp_path) -> None:
     prev = {str(p.resolve()): list(s) for p, s in snapshot(src).items()}
 
     # Replace with a different file object, same size, mtime restored.
+    # Allocate the replacement while the original is still alive so the
+    # filesystem cannot reuse its inode (ext4/overlay on CI runners reuse
+    # freed inodes immediately, which would defeat the dev/ino detection).
+    replacement = tmp_path / "replacement.bin"
+    replacement.write_bytes(b"\1" * 1024)
+    assert replacement.stat().st_ino != f.stat().st_ino
     f.unlink()
-    f.write_bytes(b"\1" * 1024)
+    os.replace(replacement, f)
     os.utime(f, ns=(st0.st_atime_ns, st0.st_mtime_ns))
 
     current = snapshot(src)
