@@ -14,6 +14,7 @@ from filewizard.watch import (
     WatcherLockError,
     add_active_watch,
     changed_paths,
+    retry_watch_paths,
     load_active_watches,
     remove_active_watch,
     snapshot,
@@ -358,3 +359,176 @@ def test_active_watch_run_applies_a_watch(tmp_path: Path) -> None:
     assert len(ops) == 1
     assert ops[0].status == "planned"
     assert (src / "note.txt").exists()
+
+
+# ---- R9.1 Unit 2: retry_watch_paths tests ----
+
+def _seed_state(state_dir, src, entries):
+    import json
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state = {"sources": {str(src.resolve()): entries}}
+    (state_dir / "watch_state.json").write_text(json.dumps(state))
+
+
+def test_retry_watch_paths_existing_registered(tmp_path: Path) -> None:
+
+    src = tmp_path / "src"
+    src.mkdir()
+    f = src / "a.txt"
+    f.write_text("x")
+    state_dir = tmp_path / "state"
+    _seed_state(state_dir, src, {str(f.resolve()): [1, 2, 3, 4, 5, 3]})
+    (state_dir / "watch_giveups.jsonl").write_text(
+        '{"path": "%s", "attempts": 3}\n' % f.resolve()
+    )
+    res = retry_watch_paths(state_dir, [str(f)])
+    assert res["reset"] == 1 and res["not_found"] == 0
+    import json
+    after = json.loads((state_dir / "watch_state.json").read_text())
+    assert after["sources"][str(src.resolve())][str(f.resolve())][-1] == 1
+    assert not (state_dir / "watch_giveups.jsonl").read_text().strip()
+
+
+def test_retry_watch_paths_nonexistent(tmp_path: Path) -> None:
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "watch_state.json").write_text('{"sources": {}}')
+    res = retry_watch_paths(state_dir, [str(tmp_path / "nope.txt")])
+    assert res["reset"] == 0 and res["not_found"] == 1
+
+
+def test_retry_watch_paths_unregistered(tmp_path: Path) -> None:
+
+    src = tmp_path / "src"
+    src.mkdir()
+    f = src / "a.txt"
+    f.write_text("x")
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "watch_state.json").write_text('{"sources": {}}')
+    res = retry_watch_paths(state_dir, [str(f)])
+    assert res["reset"] == 0 and res["not_found"] == 1
+
+
+def test_retry_watch_paths_multiple_and_duplicates(tmp_path: Path) -> None:
+
+    src = tmp_path / "src"
+    src.mkdir()
+    f1 = src / "a.txt"
+    f1.write_text("x")
+    f2 = src / "b.txt"
+    f2.write_text("y")
+    state_dir = tmp_path / "state"
+    _seed_state(state_dir, src, {
+        str(f1.resolve()): [1, 2, 3, 4, 5, 3],
+        str(f2.resolve()): [1, 2, 3, 4, 5, 3],
+    })
+    res = retry_watch_paths(state_dir, [str(f1), str(f1), str(f2)])
+    assert res["reset"] == 2
+    assert res["targets"] == 2
+
+
+def test_retry_watch_paths_persistence(tmp_path: Path) -> None:
+
+    src = tmp_path / "src"
+    src.mkdir()
+    f = src / "a.txt"
+    f.write_text("x")
+    state_dir = tmp_path / "state"
+    _seed_state(state_dir, src, {str(f.resolve()): [1, 2, 3, 4, 5, 3]})
+    retry_watch_paths(state_dir, [str(f)])
+    import json
+    after = json.loads((state_dir / "watch_state.json").read_text())
+    assert after["sources"][str(src.resolve())][str(f.resolve())][-1] == 1
+
+
+def test_retry_watch_paths_malformed_giveups(tmp_path: Path) -> None:
+
+    src = tmp_path / "src"
+    src.mkdir()
+    f = src / "a.txt"
+    f.write_text("x")
+    state_dir = tmp_path / "state"
+    _seed_state(state_dir, src, {str(f.resolve()): [1, 2, 3, 4, 5, 3]})
+    (state_dir / "watch_giveups.jsonl").write_text(
+        "not json\n" + '{"path": "%s", "attempts": 3}\n' % f.resolve()
+    )
+    retry_watch_paths(state_dir, [str(f)])
+    content = (state_dir / "watch_giveups.jsonl").read_text()
+    assert "not json" in content
+
+
+def test_retry_watch_paths_does_not_touch_others(tmp_path: Path) -> None:
+
+    src = tmp_path / "src"
+    src.mkdir()
+    f1 = src / "a.txt"
+    f1.write_text("x")
+    f2 = src / "b.txt"
+    f2.write_text("y")
+    state_dir = tmp_path / "state"
+    _seed_state(state_dir, src, {
+        str(f1.resolve()): [1, 2, 3, 4, 5, 3],
+        str(f2.resolve()): [1, 2, 3, 4, 5, 2],
+    })
+    retry_watch_paths(state_dir, [str(f1)])
+    import json
+    after = json.loads((state_dir / "watch_state.json").read_text())
+    assert after["sources"][str(src.resolve())][str(f1.resolve())][-1] == 1
+    assert after["sources"][str(src.resolve())][str(f2.resolve())][-1] == 2
+
+
+def test_retry_watch_paths_concurrency_lock(tmp_path: Path) -> None:
+    from filewizard.watch import watcher_lock, WatcherLockError
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "watch_state.json").write_text('{"sources": {}}')
+    with watcher_lock(state_dir):
+        try:
+            retry_watch_paths(state_dir, [str(tmp_path / "x.txt")])
+            raised = False
+        except WatcherLockError:
+            raised = True
+    assert raised
+
+
+def test_retry_watch_paths_while_watcher_active(tmp_path: Path) -> None:
+    """Real scenario: retry while watch_loop holds the lock raises
+    WatcherLockError (not a traceback) and documents the contract."""
+    import threading
+    import time
+
+    from filewizard.cancel import CancelToken
+    from filewizard.watch import WatchConfig, WatcherLockError, retry_watch_paths, watch_loop
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.txt").write_text("x")
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    rules = tmp_path / "rules.yaml"
+    rules.write_text("rules: []\n")
+    cfg = WatchConfig(
+        source=src, preset=None, rules=rules, dry_run=True,
+        state_dir=state_dir, limit=None, profile=None,
+        agent_features=None, allow_model_only=False,
+    )
+
+    cancel = CancelToken()
+    t = threading.Thread(
+        target=watch_loop, kwargs={"cfg": cfg, "interval": 10.0, "cancel": cancel}, daemon=True
+    )
+    t.start()
+    time.sleep(0.5)
+    try:
+        raised = False
+        try:
+            retry_watch_paths(state_dir, [str(src / "a.txt")])
+        except WatcherLockError:
+            raised = True
+        assert raised, "retry must not silently succeed while watcher holds the lock"
+    finally:
+        cancel.cancel()
+        t.join(timeout=5.0)

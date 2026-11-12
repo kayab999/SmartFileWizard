@@ -505,18 +505,18 @@ class Journal:
                 if backup.is_file():
                     # R8.3: a foreign file (including an empty regular file
                     # or a symlink) is never our placeholder. Preserve the
-                    # backup and surface an explicit review state instead of
-                    # overwriting.
+                    # backup and keep the row pending with an explicit
+                    # conflict note — never claim needs_verify without E2
+                    # evidence (ADR-0005). The operator resolves it manually.
                     self.finish_operation(
                         int(row["id"]),
-                        status="needs_verify",
+                        status="pending",
                         destination=destination,
                         error=(
                             "destination occupied during crash recovery; "
                             "displaced backup preserved for review"
                         ),
                     )
-                    promoted += 1
                     continue
             try:
                 from .identity import fs_identity_matches, content_matches

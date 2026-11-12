@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -39,3 +40,27 @@ def test_engine_report_and_timeout_path() -> None:
     # Non-pathological pattern with generous timeout still matches.
     ok = compile_pattern(r"\d+")
     assert safe_search(ok, "12345", timeout=1.0) is True
+
+
+
+def test_catastrophic_pattern_bounded_on_worker_thread() -> None:
+    """ReDoS guard must hold outside the main thread (GUI workers)."""
+    from filewizard.regexsafe import compile_pattern, engine_name, safe_search
+
+    if engine_name() != "regex":
+        pytest.skip("stdlib fallback has no effective timeout off main thread")
+
+    compiled = compile_pattern(r"(a|aa)+$")
+    result_box: dict[str, object] = {}
+
+    def worker() -> None:
+        start = time.monotonic()
+        result_box["result"] = safe_search(compiled, "a" * 40, timeout=0.05)
+        result_box["elapsed"] = time.monotonic() - start
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join(timeout=5.0)
+    assert not t.is_alive(), "worker thread hung on catastrophic regex"
+    assert isinstance(result_box["result"], bool)
+    assert float(result_box["elapsed"]) < 1.0  # type: ignore[arg-type]

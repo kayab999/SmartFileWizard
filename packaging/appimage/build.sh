@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build FileWizard AppImage from the local checkout.
 # Usage:
-#   bash packaging/appimage/build.sh              # build FileWizard-0.11.0-x86_64.AppImage in dist/
+#   bash packaging/appimage/build.sh              # build FileWizard-0.11.2-x86_64.AppImage in dist/
 #   bash packaging/appimage/build.sh --no-appimage  # only PyInstaller one-dir (for smoke)
 #
 # Requirements:
@@ -52,9 +52,9 @@ mkdir -p "$DIST"
 echo "[build] ensuring PyInstaller + runtime deps ..."
 python3 -m pip install --quiet --upgrade pip
 # Pin PyInstaller 6 to avoid 7-alpha breakage; pillow/PySide6 already in requirements
-python3 -m pip install --quiet "pyinstaller>=6,<7" "pillow>=10.0" "PySide6>=6.6" "click>=8.1" "pydantic>=2.7" "PyYAML>=6.0" "httpx>=0.27" "mcp>=2.0" || {
+python3 -m pip install --quiet "pyinstaller>=6,<7" "pillow>=10.0" "PySide6>=6.6" "click>=8.1" "pydantic>=2.7" "PyYAML>=6.0" "httpx>=0.27" "regex>=2024.0" "mcp>=2.0" || {
   echo "[build] optional mcp install failed, continuing without it"
-  python3 -m pip install --quiet "pyinstaller>=6,<7" "pillow>=10.0" "PySide6>=6.6" "click>=8.1" "pydantic>=2.7" "PyYAML>=6.0" "httpx>=0.27"
+  python3 -m pip install --quiet "pyinstaller>=6,<7" "pillow>=10.0" "PySide6>=6.6" "click>=8.1" "pydantic>=2.7" "PyYAML>=6.0" "httpx>=0.27" "regex>=2024.0"
 }
 
 # --- PyInstaller ---

@@ -1,5 +1,4 @@
 name: release
-
 on:
   push:
     tags: ["v*"]
@@ -10,12 +9,9 @@ on:
         required: false
 
 permissions:
-  contents: write
-  # Keyless Sigstore signing (cosign) needs an OIDC token.
-  id-token: write
+  contents: read
 
 jobs:
-  # Verify before packaging — reuse the test matrix from test.yml but as a gate.
   test:
     runs-on: ubuntu-22.04
     steps:
@@ -24,18 +20,12 @@ jobs:
         with:
           python-version: "3.11"
       - name: System libs (Qt/pytest-qt headless)
-        # Same as test.yml: PySide6 cannot even import conftest without
-        # libEGL/libGL/libxkbcommon on the runner.
         run: sudo apt-get update -qq && sudo apt-get install -y libegl1 libgl1 libxkbcommon0
       - name: Install (dev + ui + bounded regex engine)
-        # Strict: no fallback — a failed Qt install must fail the release gate.
         run: pip install -e ".[dev,ui,redos]"
       - name: pytest
         env:
           QT_QPA_PLATFORM: offscreen
-        # Same hard-exit pattern as test.yml: coverage and the gate are
-        # finalized inside pytest.main(); os._exit() skips the interpreter
-        # finalization where PySide6 can segfault after a green run.
         run: |
           python - <<'PYEOF'
           import os, sys
@@ -51,44 +41,37 @@ jobs:
   appimage:
     needs: test
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install system deps (FUSE + desktop validation)
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y libfuse2 desktop-file-utils
-
       - name: Build AppImage
         env:
-          # B2-3: reproducible-builds best effort — fixed epoch keeps file
-          # mtimes inside the bundle deterministic for identical inputs.
           SOURCE_DATE_EPOCH: 1735689600
         run: |
           bash packaging/appimage/build.sh
           ls -lh dist/*.AppImage
           sha256sum dist/*.AppImage
-
       - name: Smoke check (CLI inside AppImage)
         run: |
           chmod +x dist/*.AppImage
-          # --appimage-extract-and-run avoids needing FUSE in CI session
           dist/FileWizard-*.AppImage --appimage-extract-and-run --help || dist/FileWizard-*.AppImage --help
           dist/FileWizard-*.AppImage --appimage-extract-and-run --version || dist/FileWizard-*.AppImage --version
-
       - name: Generate SBOM (CycloneDX)
         run: |
           python -m pip install --quiet cyclonedx-bom
-          cyclonedx-py environment --output-file dist/sbom.json || true
-          ls -lh dist/sbom.json 2>/dev/null || true
-
+          cyclonedx-py environment --output-file dist/sbom.json
+          test -s dist/sbom.json
+          ls -lh dist/sbom.json
       - name: Sign artifacts (optional GPG)
-        # `secrets` context is not allowed in step-level `if:`; guard inside
-        # the script instead. Skips cleanly when no key is configured.
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
@@ -97,47 +80,45 @@ jobs:
             exit 0
           fi
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-          for f in dist/*.AppImage dist/*.deb; do
+          for f in dist/*.AppImage; do
             [ -f "$f" ] && gpg --batch --yes --detach-sign --armor "$f"
           done
-
       - name: Sign artifacts (keyless cosign)
         run: |
-          pip install --quiet cosign 2>/dev/null || true
-          curl -sSfL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+          COSIGN_VERSION=v2.6.5
+          curl -sSfL -o cosign_checksums.txt "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign_checksums.txt"
+          curl -sSfL -o cosign-linux-amd64 "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          # The manifest entry name must match the downloaded file name.
+          grep ' cosign-linux-amd64$' cosign_checksums.txt | sha256sum -c -
+          mv cosign-linux-amd64 cosign
           chmod +x cosign
-          for f in dist/*.AppImage dist/*.deb; do
+          ./cosign version
+          for f in dist/*.AppImage; do
             [ -f "$f" ] && ./cosign sign-blob --yes --bundle "$f.bundle" "$f"
           done
-          sha256sum dist/*.AppImage dist/*.deb dist/sbom.json 2>/dev/null > dist/SHA256SUMS || true
-
-      - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - name: Upload appimage artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: appimage-dist
+          path: |
             dist/*.AppImage
-            dist/*.deb
-            dist/sbom.json
+            dist/*.AppImage.bundle
             dist/*.asc
-            dist/*.sig
-            dist/*.cert
-            dist/*.bundle
-            dist/SHA256SUMS
-          generate_release_notes: true
-          fail_on_unmatched_files: false
+            dist/sbom.json
+          if-no-files-found: error
 
   deb:
-    needs: [test, appimage]
+    needs: test
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: System libs (Qt/pytest-qt headless)
-        # PyInstaller collects PySide6 plugins; the smoke check runs the
-        # bundled binary which needs libEGL/libGL/libxkbcommon on the runner.
         run: sudo apt-get update -qq && sudo apt-get install -y libegl1 libgl1 libxkbcommon0
       - name: Build .deb (from PyInstaller one-dir)
         env:
@@ -164,9 +145,62 @@ jobs:
           filewizard --help
           filewizard --version
           filewizard-ui --help || echo "ui help exit code $?"
-      - name: Upload .deb to Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - name: Sign .deb (keyless cosign)
+        run: |
+          COSIGN_VERSION=v2.6.5
+          curl -sSfL -o cosign_checksums.txt "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign_checksums.txt"
+          curl -sSfL -o cosign-linux-amd64 "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          grep ' cosign-linux-amd64$' cosign_checksums.txt | sha256sum -c -
+          mv cosign-linux-amd64 cosign
+          chmod +x cosign
+          ./cosign version
+          for f in dist/*.deb; do
+            [ -f "$f" ] && ./cosign sign-blob --yes --bundle "$f.bundle" "$f"
+          done
+      - name: Upload deb artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: dist/*.deb
-          generate_release_notes: false
+          name: deb-dist
+          path: |
+            dist/*.deb
+            dist/*.deb.bundle
+          if-no-files-found: error
+
+  publish:
+    needs: [appimage, deb]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Verify final artifact set
+        run: |
+          ls -lh dist/
+          test -n "$(ls dist/*.AppImage 2>/dev/null)" || { echo "missing AppImage"; exit 1; }
+          test -n "$(ls dist/*.deb 2>/dev/null)" || { echo "missing deb"; exit 1; }
+          test -s dist/sbom.json
+      - name: Generate and verify checksums
+        run: |
+          cd dist
+          sha256sum *.AppImage *.deb sbom.json > SHA256SUMS
+          test -s SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v4
+        with:
+          files: |
+            dist/*.AppImage
+            dist/*.AppImage.bundle
+            dist/*.deb
+            dist/*.deb.bundle
+            dist/*.asc
+            dist/sbom.json
+            dist/SHA256SUMS
+          generate_release_notes: true
+          fail_on_unmatched_files: false

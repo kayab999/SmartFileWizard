@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -354,8 +353,10 @@ class ConditionsPage(QWidget):
 
         if filename_regex:
             try:
-                re.compile(filename_regex)
-            except re.error as exc:
+                from filewizard.regexsafe import compile_pattern
+
+                compile_pattern(filename_regex)
+            except Exception as exc:
                 QMessageBox.critical(
                     self,
                     "FileWizard",

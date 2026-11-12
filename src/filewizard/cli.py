@@ -1094,6 +1094,10 @@ def watch_giveups(state_dir: Path, clear: bool) -> None:
     if clear:
         clear_giveups(state_dir)
         click.echo(f"Cleared {len(events)} event(s).")
+        click.echo(
+            "Note: attempt counters in watch_state.json are unchanged; "
+            "use `filewizard watch retry PATH...` to re-enable processing."
+        )
     """List active watches (enable list)."""
     from .watch import _active_watches_path, load_active_watches
 
@@ -1111,6 +1115,40 @@ def watch_giveups(state_dir: Path, clear: bool) -> None:
         mode = "dry-run" if w.dry_run else "execute"
         click.echo(f"  - {w.name}: {w.source} [{spec}] "
                    f"({mode}, every {w.interval_s}s)")
+
+
+@watch_cmd.command("retry")
+@click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path), required=True)
+@click.option(
+    "--state-dir",
+    type=click.Path(path_type=Path),
+    default=Path("~/.local/share/filewizard").expanduser(),
+    help="State and journal directory.",
+)
+def watch_retry(paths: tuple[Path, ...], state_dir: Path) -> None:
+    """Reset attempt counters so the given paths are processed again.
+
+    Does not modify the files themselves. Clears matching give-up entries.
+    """
+    from .watch import retry_watch_paths
+
+    state_dir = state_dir.expanduser().resolve()
+    try:
+        result = retry_watch_paths(state_dir, [str(p) for p in paths])
+    except Exception as exc:  # WatcherLockError or IO
+        from .watch import WatcherLockError
+
+        if isinstance(exc, WatcherLockError):
+            raise click.ClickException(
+                "Cannot retry while the watcher is running: %s\n"
+                "Stop the watcher (Ctrl-C / kill the `watch run` process) "
+                "and re-run `filewizard watch retry ...`." % exc
+            ) from exc
+        raise
+    click.echo(
+        f"Retry scheduled: reset={result['reset']} "
+        f"targets={result['targets']} not_found={result['not_found']}"
+    )
 
 
 @watch_cmd.command("add")

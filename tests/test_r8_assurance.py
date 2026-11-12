@@ -289,16 +289,16 @@ def test_r83_reconcile_preserves_foreign_destination_and_backup(
             victim.write_text("victim", encoding="utf-8")
             dst.symlink_to(victim)
         promoted, pending = journal.reconcile_pending()
-        assert (promoted, pending) == (1, 0)
+        assert (promoted, pending) == (0, 1)
         row = journal.get_operation(op_id)
-        assert row["status"] == "needs_verify"
-        assert "occupied" in row["error"]
+        assert row["status"] == "pending"
+        assert "occupied" in (row["error"] or "")
         assert backup.read_text(encoding="utf-8") == "old"
         if occupant == "empty":
             assert dst.read_bytes() == b""
         else:
             assert dst.is_symlink()
-        assert journal.reconcile_pending() == (0, 0)
+        assert journal.reconcile_pending() == (0, 1)
 
 
 def _displaced_record(content: str, path: Path) -> dict:

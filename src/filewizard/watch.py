@@ -425,6 +425,75 @@ def clear_giveups(state_dir: Path) -> None:
             pass
 
 
+def retry_watch_paths(state_dir: Path, paths: list[str]) -> dict[str, int]:
+    """Reset attempt counters for the given paths in watch_state.json.
+
+    Runs under ``watcher_lock`` so it cannot race a live watcher tick.
+    Returns a dict with ``reset`` (entries whose counter was reset) and
+    ``not_found`` (requested paths absent from every source's state). The
+    give-up log is filtered to drop entries for retried paths so the
+    operator's view matches the new state.
+    """
+    state_dir = state_dir.expanduser().resolve()
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    targets = {str(Path(p).expanduser().resolve()) for p in paths}
+
+    with watcher_lock(state_dir):
+        state_path = _state_path(state_dir)
+        state = _load_state(state_path)
+
+        reset = 0
+        found: set[str] = set()
+        for source, entries in state.items():
+            if not isinstance(entries, dict):
+                continue
+            for key in list(entries.keys()):
+                try:
+                    resolved = str(Path(key).resolve())
+                except (OSError, RuntimeError):
+                    resolved = key
+                if resolved not in targets:
+                    continue
+                sig = entries.get(key)
+                if isinstance(sig, list) and sig:
+                    # 1 (not 0): changed_paths re-enqueues a path only when
+                    # 0 < attempts < MAX_WATCH_ATTEMPTS.
+                    sig[-1] = 1
+                    entries[key] = sig
+                    reset += 1
+                    found.add(resolved)
+        _save_state(state_path, state)
+
+        # Filter give-ups for retried paths.
+        gp = _giveups_path(state_dir)
+        if gp.exists():
+            kept: list[str] = []
+            for line in gp.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    kept.append(line)
+                    continue
+                ev_path = ev.get("path")
+                try:
+                    ev_resolved = (
+                        str(Path(str(ev_path)).resolve()) if ev_path else ""
+                    )
+                except (OSError, RuntimeError):
+                    ev_resolved = str(ev_path)
+                if ev_resolved in targets:
+                    continue
+                kept.append(line)
+            atomic_write_text(gp, "\n".join(kept) + ("\n" if kept else ""))
+
+    not_found = len(targets - found)
+    return {"reset": reset, "not_found": not_found, "targets": len(targets)}
+
+
 def changed_paths(
     prev: dict[str, list[int]],
     current: dict[Path, tuple[int, ...]],

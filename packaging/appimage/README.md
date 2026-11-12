@@ -1,6 +1,6 @@
 # FileWizard AppImage packaging
 
-Local build for `FileWizard-0.11.0-x86_64.AppImage`.
+Local build for `FileWizard-0.11.2-x86_64.AppImage`.
 
 ## Quick build (Ubuntu 22.04 / Debian 12 / Fedora 40)
 
