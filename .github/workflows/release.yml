@@ -107,7 +107,7 @@ jobs:
           curl -sSfL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
           chmod +x cosign
           for f in dist/*.AppImage dist/*.deb; do
-            [ -f "$f" ] && ./cosign sign-blob --yes --output-signature "$f.sig" --output-certificate "$f.cert" "$f"
+            [ -f "$f" ] && ./cosign sign-blob --yes --bundle "$f.bundle" "$f"
           done
           sha256sum dist/*.AppImage dist/*.deb dist/sbom.json 2>/dev/null > dist/SHA256SUMS || true
 
@@ -121,6 +121,7 @@ jobs:
             dist/*.asc
             dist/*.sig
             dist/*.cert
+            dist/*.bundle
             dist/SHA256SUMS
           generate_release_notes: true
           fail_on_unmatched_files: false
