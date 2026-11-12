@@ -64,6 +64,7 @@ hiddenimports = [
     "yaml",
     "pydantic",
     "click",
+    "httpx",
 ]
 
 # Exclude heavy optional deps that are NOT bundled (zeroshot/torch).
