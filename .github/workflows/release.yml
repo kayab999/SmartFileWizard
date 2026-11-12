@@ -112,6 +112,7 @@ jobs:
           sha256sum dist/*.AppImage dist/*.deb dist/sbom.json 2>/dev/null > dist/SHA256SUMS || true
 
       - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -134,6 +135,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: System libs (Qt/pytest-qt headless)
+        # PyInstaller collects PySide6 plugins; the smoke check runs the
+        # bundled binary which needs libEGL/libGL/libxkbcommon on the runner.
+        run: sudo apt-get update -qq && sudo apt-get install -y libegl1 libgl1 libxkbcommon0
       - name: Build .deb (from PyInstaller one-dir)
         env:
           SOURCE_DATE_EPOCH: 1735689600
@@ -160,6 +165,7 @@ jobs:
           filewizard --version
           filewizard-ui --help || echo "ui help exit code $?"
       - name: Upload .deb to Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.deb
